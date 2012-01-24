@@ -25,7 +25,7 @@
   values to the application's state."
   :type)
 
-(defmethod action :init [_]
+(defmethod action :init [_] 
   (reset! state {:state :init}))
 
 (defmethod action :form [_]

@@ -16,7 +16,7 @@ For more information see library.logging."}
 (dispatch/react-to (constantly true)
                    (fn [t d] (log/info logger (str (pr-str t) " - " (pr-str d)))))
 
-(comment
+(do ;; comment
   ;; log to the console
   (log/start-display (log/console-output))
   ;; log to to the "fancy" window

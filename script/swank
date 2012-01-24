@@ -1,0 +1,8 @@
+#!/bin/bash
+
+cd `dirname $0`/..
+
+source script/setup_classpath.sh
+
+CLJSC_CP=$CLJSC_CP:~/.lein/plugins/\*
+java -server -cp $CLJSC_CP clojure.main -e "(do (require 'swank.swank) (swank.swank/start-repl))"
