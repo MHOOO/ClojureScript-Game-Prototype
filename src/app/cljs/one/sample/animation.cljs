@@ -74,22 +74,22 @@
 (defn gen-move-behavior
   "Generate & return a move behavior for the target. Still must be added by calling .addBehavior.
    Examples: 
-   (gen-move-behavior hat :to {:up 30})
-   (gen-move-behavior hat :from {:up 30} :to {:down 30})
-   (gen-move-behavior hat :from {:down 30})
+   (gen-move-behavior :to {:up 30})
+   (gen-move-behavior :from {:up 30} :to {:down 30})
+   (gen-move-behavior :from {:down 30})
 
-   (gen-move-behavior hat :from [0 0] :to [50 50] :time 120)
-   (gen-move-behavior hat :from [50 50] :to [0 0] :time [120 120])"
-  [target & {:keys [from to time auto-rotate?]
-             :or {time 120 auto-rotate? false}}]
+   (gen-move-behavior :from [0 0] :to [50 50] :time 120)
+   (gen-move-behavior :from [50 50] :to [0 0] :time [120 120])"
+  [& {:keys [from to time auto-rotate?]
+      :or {time 120 auto-rotate? false}}]
   (let [nr (fn [n] (or n 0))
         [to-x to-y] (if (vector? to) to)
         [from-x from-y] (if (vector? from) from)
-        [start-time time] (if (vector? time) time [(.time target) time])]
+        [start-time time] (if (vector? time) time [0 time])]
     ;; (log/info logger
     ;;           (str (+ (nr (:right from)) (- (nr (:left from)))) " " (+ (nr (:down from)) (- (nr (:up from)))) " -> "
     ;;                (+ (nr (:right to)) (- (nr (:left to)))) " " (+ (nr (:down to)) (- (nr (:up to))))))
-    (log/info logger (str start-time " " time))
+    ;; (log/info logger (str start-time " " time))
     (doto (CAAT/PathBehavior.)
       (.setFrameTime start-time time)
       (.setAutoRotate (if auto-rotate? true false) (if (fn? auto-rotate?) auto-rotate? nil))
@@ -103,9 +103,9 @@
 (defn deg->rad [deg]
   (* (* 2 Math/PI) (/ deg 360)))
 
-(defn gen-rotate-behavior [target & {:keys [from to time rotation-anchor]
-                                     :or {from 0 to 0 time 120 rotation-anchor [0.5 0.5]}}]
-  (let [[start-time time] (if (vector? time) time [(.time target) time])]
+(defn gen-rotate-behavior [& {:keys [from to time rotation-anchor]
+                              :or {from 0 to 0 time 120 rotation-anchor [0.5 0.5]}}]
+  (let [[start-time time] (if (vector? time) time [0 time])]
     (doto (CAAT/RotateBehavior.)
       (.setFrameTime start-time time) 
       (.setValues (deg->rad from)
@@ -114,35 +114,107 @@
                   (y-of rotation-anchor)
                   ))))
 
-(defn basket-head-munch! [basket-head]
-  (let [t (.time basket-head)
-        md 10]
-   (doto basket-head
-     (.addBehavior (gen-move-behavior basket-head :to {:up md :left 5} :time 200))
-     (.addBehavior (gen-move-behavior basket-head :from {:up md :left 5} :time [(+ t 200) 300]))
-     (.addBehavior (gen-move-behavior basket-head :to {:up md :left (- 5)} :time [(+ t 500) 150]))
-     (.addBehavior (gen-move-behavior basket-head :from {:up md :left (- 5)} :time [(+ t 650) 300]))
-     (.addBehavior (gen-move-behavior basket-head :to {:up (/ md 2) :left 5} :time [(+ 950) 200]))
-     (.addBehavior (gen-move-behavior basket-head :from {:up (/ md 2) :left 5} :time [(+ t 1150) 100]))
-     (.addBehavior (gen-move-behavior basket-head :to {:up (/ md 2) :left (- 5)} :time [(+ t 1250) 150]))
-     (.addBehavior (gen-move-behavior basket-head :from {:up (/ md 2) :left (- 5)} :time [(+ t 1400) 100])))))
+(defn gen-parallel-behavior [& args]
+  (let [container (doto (CAAT/ContainerBehavior.)
+                    (.setFrameTime 0 Number.MAX_VALUE))] 
+    (doseq [spec args]
+      (let [bh (gen-behavior spec)] 
+        (.setFrameTime bh 0 (. bh (getDuration))) 
+        (.addBehavior container bh)))
+    container))
+
+(def kw->behavior-fn {:move (fn [arg] (apply gen-move-behavior arg))
+                      :rotate (fn [arg] (apply gen-rotate-behavior arg))
+                      :parallel gen-parallel-behavior})
+
+(defprotocol AAnimationSpec
+  (gen-behavior [s]))
+
+(extend-protocol AAnimationSpec
+  CAAT.Behavior
+  (gen-behavior [s] s)
+  cljs.core.Vector
+  (gen-behavior [v]
+                (let [[kind & args] v]
+                  (log/info logger (str "Apply called on kind" kind))
+                  (apply (kind kw->behavior-fn) args))))
+
+(defn animation-specs->behavior
+  "Given a TARGET and any number of animation SPECS, create & return a
+ContainerBehavior which encompasses all the animations. The animations
+will be executed syncronously. Any starting-time set on a spec will be
+overriden, so that there are no waits between animations (unless
+explicitly specified using a wait-spec)."
+  ([target & specs]
+     (let [container (doto (CAAT/ContainerBehavior.)
+                       (.setFrameTime (.time target) Number.MAX_VALUE))]
+       (loop [[spec & more] specs
+              t 0
+              last-caat-behavior nil]
+         (when (not (nil? spec))
+           (if (fn? spec)
+             (do (when last-caat-behavior
+                   ;; (log/info logger (str "Adding listener fn: " spec " to " last-caat-behavior))
+                   (.addListener
+                    last-caat-behavior
+                    (clj->js
+                     {:behaviorExpired
+                      (let [callback-fn spec]
+                        (fn [bh t a]
+                          ;; (log/info logger (pr-str "Calling expiration fn" spec))
+                          (callback-fn t)))})))
+                 (recur more t last-caat-behavior))
+             (let [bh (gen-behavior spec)
+                   dur (. bh (getDuration))
+                   last-caat-behavior (if (instance? CAAT.Behavior bh) bh last-caat-behavior)] 
+               (.setFrameTime bh t dur) 
+               (.addBehavior container bh)
+               (recur more
+                      (+ t dur)
+                      last-caat-behavior)))))
+       container)))
+
+(defn animate
+  "Animate a target. Besides the target, takes any number of behavior specs.
+   For supported specs, take a look at the KW->BEHAVIOR-FN map.
+  Example:
+    (animate target [:move [:to {:up md :left 5} :time 200]])"
+  [target & animations]
+  (.addBehavior target (apply animation-specs->behavior target animations)))
+
+(defn basket-head-munch! [basket-head & {:keys [on-finish] :or {on-finish (fn [])}}]
+  (let [md 10]
+    (animate basket-head 
+             [:move [:to {:up md :left 5} :time 200]]
+             [:move [:from {:up md :left 5} :time 300]]
+             [:move [:to {:up md :left (- 5)} :time 150]]
+             [:move [:from {:up md :left (- 5)} :time 300]]
+             [:move [:to {:up (/ md 2) :left 5} :time 200]]
+             [:move [:from {:up (/ md 2) :left 5} :time 100]]
+             [:move [:to {:up (/ md 2) :left (- 5)} :time 150]]
+             [:move [:from {:up (/ md 2) :left (- 5)} :time 100]]
+             (fn [t] (on-finish)))))
 
 (defn basket-head-talk! [basket-head]
-  (let [t (.time basket-head)
-        md 10]
-   (doto basket-head
-     (.addBehavior (gen-move-behavior basket-head :to {:up md :left 5} :time 80))
-     (.addBehavior (gen-move-behavior basket-head :from {:up md :left 5} :time [(+ t 80) 80]))
-     (.addBehavior (gen-move-behavior basket-head :to {:up md :left (- 5)} :time [(+ t 160) 80]))
-     (.addBehavior (gen-move-behavior basket-head :from {:up md :left (- 5)} :time [(+ t 240) 80])))))
+  (let [md 10
+        tpa 90]
+   (apply
+    animate basket-head
+            (apply
+             concat
+             (repeat
+              2
+              [[:move [:to {:up md :left 5} :time tpa]]
+               [:move [:from {:up md :left 5} :time tpa]]
+               [:move [:to {:up md :left (- 5)} :time tpa]]
+               [:move [:from {:up md :left (- 5)} :time tpa]]])))))
 
 (defn basket-body-shake! [basket-body]
-  (let [t (.time basket-body)]
-   (doto basket-body
-     (.addBehavior (gen-rotate-behavior basket-body :to 5 :time 80))
-     (.addBehavior (gen-rotate-behavior basket-body :from 5 :time [(+ t 80) 80]))
-     (.addBehavior (gen-rotate-behavior basket-body :to -5 :time [(+ t 160) 80]))
-     (.addBehavior (gen-rotate-behavior basket-body :from -5 :time [(+ t 240) 80])))))
+  (animate basket-body
+           [:rotate [:to 5 :time 80]]
+           [:rotate [:from 5 :time 80]]
+           [:rotate [:to -5 :time 80]]
+           [:rotate [:from -5 :time 80]]))
 
 (defn gen-basket
   "Generate & return the interactive basket.
@@ -167,18 +239,19 @@
     (.addChild basket-container basket-head)
     (set! basket-container.isOpened false)
     (set! basket-container.doMunch
-          (fn []
-            (basket-head-munch! basket-head)))
+          (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
+            (basket-head-munch! basket-head :on-finish on-finish)))
     (set! basket-container.doTalk
           (fn []
             (basket-head-talk! basket-head)))
     (set! basket-container.doOpen
-          (fn []
+          (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
             (when (not this.isOpened)
-              ;; (log/info logger "Opening basket")
-              (doto basket-head
-                (.addBehavior (gen-shaky-behavior basket-head))
-                (.addBehavior (gen-move-behavior basket-head :to {:up 30})))
+              (log/info logger "Opening basket")
+              (animate basket-head (gen-shaky-behavior basket-head))
+              (animate basket-head
+                       (gen-move-behavior :to {:up 30})
+                       (fn [t] (on-finish)))
               (.addBehavior basket-body
                             (doto (CAAT/ScaleBehavior.)
                               (.setFrameTime (.time basket-body) 120)
@@ -186,13 +259,15 @@
               (set! this.isOpened true))))
 
     (set! basket-container.doClose
-          (fn []
+          (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
             (when this.isOpened
               ;; (log/info logger "Closing basket")
               (doto basket-head
                 (. (emptyBehaviorList))
                 (.setRotation 0)
-                (.addBehavior (gen-move-behavior basket-head :from {:up 30})))
+                (animate [:move [:from {:up 30}]]
+                         (fn [t] (on-finish))))
+              
               (.addBehavior basket-body
                             (doto (CAAT/ScaleBehavior.)
                               (.setFrameTime (.time basket-body) 120)
@@ -200,6 +275,7 @@
               (set! this.isOpened false))))
     ;; make sure the sprite changes when the mouse hovers over the basket
     (set! basket-body.mouseEnter (fn [mouseEvent]
+                                   ;; (. basket-container (doMunch))
                                    (. basket-container (doOpen))
                                    ))
     (set! basket-body.mouseExit (fn [mouseEvent] (. basket-container (doClose))))
@@ -207,7 +283,7 @@
 
 (defn throw-into-basket
   "Animate a TARGET by moving it into the BASKET."
-  [scene basket target] 
+  [director scene basket target counter] 
   (let [total-animation-time 400
         source (.modelToView target (CAAT/Point. 0 0))
         destination (.modelToView basket (CAAT/Point. 0 0))
@@ -220,15 +296,39 @@
     ;; (log/info logger (str "Src: " source ";Dest: " destination))
     (let [body (.getChildAt basket 0)
           head (.getChildAt basket 1)]
-      (log/info logger (str "Head: " head ";Body: " body))
       (basket-body-shake! body)
-      ;; TODO: have the basket do the talking after it has opened up
-      ;; (basket-head-talk! head)
+      (.enableEvents basket false)
+      (set! basket.eating true)
+      (. basket
+         (doOpen
+          :on-finish
+          (fn []
+            (. basket
+               (doClose
+                :on-finish
+                (fn []
+                  (.audioPlay director "munching")
+                  (. basket
+                     (doMunch
+                      :on-finish
+                      (fn []
+                        (. counter (inc))
+                        (.audioPlay director "chime")
+                        ;; TODO: have the basket do the talking after it has opened up
+                        (basket-head-talk! head)
+                        (.enableEvents basket true)
+                        (set! basket.eating false)
+                        (message! director scene
+                                  (rand-nth *positive-feedbacks*)
+                                  :x 510 :y 290
+                                  :duration 1500)))))))))) 
+      
       )
     (set! target.trashed true)
     (doto target
+      (.enableDrag false)
       (.enableEvents false)
-      (.addBehavior (gen-move-behavior target :from [(.x source) (.y source)] :to [(.x destination) (.y destination)]))
+      (.addBehavior (gen-move-behavior :from [(.x source) (.y source)] :to [(.x destination) (.y destination)]))
       (.addBehavior (doto (CAAT/ScaleBehavior.)
                       (.setFrameTime (.time target) total-animation-time)
                       (.setValues 1 0.1 1 0.1)))
@@ -331,15 +431,14 @@
    "Print out a message using a speech bubble. The message will stay
    for 2.5 seconds until it vanishes. A second call will remove any
    currently displayed message first."
-   [director scene msg]
+   [director scene msg & {:keys [x y duration]
+                          :or {duration 2500
+                               x 20 y (fn [w h]
+                                        (- (.height director) h 20))}}]
    (when current.object
      (log/info logger (str "Expiring old message bubble: " current.object))
      (.setExpired current.object (.time scene)))
-   (let [new-message (gen-bubble
-                      director scene msg
-                      :x 20
-                      :y (fn [w h]
-                           (- (.height director) h 20)) :time 2500)]
+   (let [new-message (gen-bubble director scene msg :x x :y y :time duration)]
      (add! scene new-message)
      (set! current.object new-message))))
 
@@ -381,14 +480,10 @@
         (fn [event]
           (let [point-in-basket (.modelToModel target (.point event) basket)]
             (if (.contains basket (.x point-in-basket) (.y point-in-basket))
-              (when (. basket (doOpen))
-                (throw-into-basket scene basket target)
-                (. counter (inc))
-                (.audioPlay director "munching")
-                (. basket (doMunch))
-                ;; (message! director scene (rand-nth *positive-feedbacks*))
-                )
-              (. basket (doClose))))
+              (when (and (not (.isOpened basket)) (not (.eating basket)))
+                (throw-into-basket director scene basket target counter))
+              ;; (. basket (doClose))
+              ))
           (.__mouseDrag target event)))
   (m/wrap target.mouseDown [e oldf]
           (.audioPlay director "flopp")
