@@ -28,9 +28,6 @@
 (defmethod action :init [_] 
   (reset! state {:state :init}))
 
-(defmethod action :form [_]
-  (when-not (#{:form :init} (:state @state))
-    (swap! state assoc :state :form)))
 
 (defn host
   "Get the name of the host which served this script."
@@ -63,8 +60,5 @@
                  (assoc (assoc old :state :greeting :name name)
                    :exists (boolean (:exists response))))))
 
-(defmethod action :greeting [{name :name}]
-  (remote :add-name {:name name} #(add-name-callback name %)))
-
-(dispatch/react-to #{:init :form :greeting}
+(dispatch/react-to #{:init}
                    (fn [t d] (action (assoc d :type t))))

@@ -14,3 +14,15 @@
   {:form (snippet "form.html" [:div#form])
    :greeting (snippet "greeting.html" [:div#greeting])
    :game (snippet "game.html" [:div#game])})
+
+
+(defmacro wrap
+  [target-sym arglist & body]
+  `(let [~'oldf ~target-sym]
+     (set!
+      ~target-sym
+      (fn [& args#]
+        (let [~arglist args#]
+          ~@body))
+      ))
+  )

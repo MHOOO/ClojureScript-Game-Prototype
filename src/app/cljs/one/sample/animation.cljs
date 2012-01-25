@@ -5,35 +5,15 @@
         [one.browser.animation :only (bind parallel serial play play-animation)]
         [domina :only (by-id set-html! set-styles! destroy-children! append!)]
         [domina.xpath :only (xpath)])
+  (:require-macros [one.sample.snippets :as m])
   (:require [goog.dom.forms :as gforms]
             [goog.style :as style]
             [one.logging :as log]))
-
-(def form "//div[@id='form']")
-(def cloud "//div[@id='greeting']")
-(def label "//label[@id='name-input-label']/span")
 
 (def ^:private
   form-in {:effect :fade :start 0 :end 1 :time 800})
 
 (def logger (log/get-logger "animation"))
-
-(defn jsArr
-  "Recursively converts a sequential object into a JavaScript array"
-  [seq]
-  (.array (vec (map #(if (sequential? %) (jsArr %) %)
-                    seq))))
-
-(defn jsObj
-  "Convert a clojure map into a JavaScript object"
-  [obj]
-  (.strobj (into {} (map (fn [[k v]]
-                           (let [k (if (keyword? k) (name k) k)
-                                 v (if (keyword? v) (name v) v)]
-                             (if (map? v)
-                               [k (jsObj v)]
-                               [k v])))
-                         obj))))
 
 (defn clj->js
   "Recursively transforms ClojureScript maps into Javascript objects,
@@ -48,7 +28,22 @@
    (coll? x) (apply array (map clj->js x))
    :else x))
 
-(defn gen-shaky-behavior [target]
+(defprotocol AXYProvider
+  (x-of [t])
+  (y-of [t]))
+
+(extend-protocol AXYProvider
+  cljs.core.Vector
+  (x-of [t] (first t))
+  (y-of [t] (second t))
+  CAAT.Point
+  (x-of [t] (.x t))
+  (y-of [t] (.y t)))
+
+
+(defn gen-shaky-behavior
+  "Generate & return a rotation behavior that will rotate a target left & right repeatedly."
+  [target]
   (let [container (CAAT/ContainerBehavior.)
         total-time 1500.0
         rotation-strenght (/ (* 2 Math/PI) 140)]
@@ -83,18 +78,21 @@
    (gen-move-behavior hat :from {:up 30} :to {:down 30})
    (gen-move-behavior hat :from {:down 30})
 
-   (gen-move-behavior hat :from [0 0] :to [50 50]"
-  [target & {from :from 
-             to :to
-             time :time :or {time 120}}]
+   (gen-move-behavior hat :from [0 0] :to [50 50] :time 120)
+   (gen-move-behavior hat :from [50 50] :to [0 0] :time [120 120])"
+  [target & {:keys [from to time auto-rotate?]
+             :or {time 120 auto-rotate? false}}]
   (let [nr (fn [n] (or n 0))
         [to-x to-y] (if (vector? to) to)
-        [from-x from-y] (if (vector? from) from)]
+        [from-x from-y] (if (vector? from) from)
+        [start-time time] (if (vector? time) time [(.time target) time])]
     ;; (log/info logger
     ;;           (str (+ (nr (:right from)) (- (nr (:left from)))) " " (+ (nr (:down from)) (- (nr (:up from)))) " -> "
     ;;                (+ (nr (:right to)) (- (nr (:left to)))) " " (+ (nr (:down to)) (- (nr (:up to))))))
+    (log/info logger (str start-time " " time))
     (doto (CAAT/PathBehavior.)
-      (.setFrameTime (.time target) time)
+      (.setFrameTime start-time time)
+      (.setAutoRotate (if auto-rotate? true false) (if (fn? auto-rotate?) auto-rotate? nil))
       (.setPath
        (doto (CAAT/Path.)
          (.setLinear (or from-x (+ (nr (:right from)) (- (nr (:left from)))))
@@ -102,16 +100,61 @@
                      (or to-x (+ (nr (:right to)) (- (nr (:left to)))))
                      (or to-y (+ (nr (:down to)) (- (nr (:up to)))))))))))
 
+(defn deg->rad [deg]
+  (* (* 2 Math/PI) (/ deg 360)))
+
+(defn gen-rotate-behavior [target & {:keys [from to time rotation-anchor]
+                                     :or {from 0 to 0 time 120 rotation-anchor [0.5 0.5]}}]
+  (let [[start-time time] (if (vector? time) time [(.time target) time])]
+    (doto (CAAT/RotateBehavior.)
+      (.setFrameTime start-time time) 
+      (.setValues (deg->rad from)
+                  (deg->rad to)
+                  (x-of rotation-anchor)
+                  (y-of rotation-anchor)
+                  ))))
+
+(defn basket-head-munch! [basket-head]
+  (let [t (.time basket-head)
+        md 10]
+   (doto basket-head
+     (.addBehavior (gen-move-behavior basket-head :to {:up md :left 5} :time 200))
+     (.addBehavior (gen-move-behavior basket-head :from {:up md :left 5} :time [(+ t 200) 300]))
+     (.addBehavior (gen-move-behavior basket-head :to {:up md :left (- 5)} :time [(+ t 500) 150]))
+     (.addBehavior (gen-move-behavior basket-head :from {:up md :left (- 5)} :time [(+ t 650) 300]))
+     (.addBehavior (gen-move-behavior basket-head :to {:up (/ md 2) :left 5} :time [(+ 950) 200]))
+     (.addBehavior (gen-move-behavior basket-head :from {:up (/ md 2) :left 5} :time [(+ t 1150) 100]))
+     (.addBehavior (gen-move-behavior basket-head :to {:up (/ md 2) :left (- 5)} :time [(+ t 1250) 150]))
+     (.addBehavior (gen-move-behavior basket-head :from {:up (/ md 2) :left (- 5)} :time [(+ t 1400) 100])))))
+
+(defn basket-head-talk! [basket-head]
+  (let [t (.time basket-head)
+        md 10]
+   (doto basket-head
+     (.addBehavior (gen-move-behavior basket-head :to {:up md :left 5} :time 80))
+     (.addBehavior (gen-move-behavior basket-head :from {:up md :left 5} :time [(+ t 80) 80]))
+     (.addBehavior (gen-move-behavior basket-head :to {:up md :left (- 5)} :time [(+ t 160) 80]))
+     (.addBehavior (gen-move-behavior basket-head :from {:up md :left (- 5)} :time [(+ t 240) 80])))))
+
+(defn basket-body-shake! [basket-body]
+  (let [t (.time basket-body)]
+   (doto basket-body
+     (.addBehavior (gen-rotate-behavior basket-body :to 5 :time 80))
+     (.addBehavior (gen-rotate-behavior basket-body :from 5 :time [(+ t 80) 80]))
+     (.addBehavior (gen-rotate-behavior basket-body :to -5 :time [(+ t 160) 80]))
+     (.addBehavior (gen-rotate-behavior basket-body :from -5 :time [(+ t 240) 80])))))
 
 (defn gen-basket
-  "Generate & return the interactive basket."
-  [director]
+  "Generate & return the interactive basket.
+   The basket will have doOpen & doClose methods to open & close
+  it. Also it will open & close when hovered."
+  [director & {:keys [x y] :or {x 490 y 320}}]
   (let [scale-factor 1.02
         basket-sprite (.initialize (CAAT/SpriteImage.) (.getImage director "basket") 1 2)
         basket-head (.initialize (CAAT/SpriteImage.) (.getImage director "basket-head") 1 1)
         basket-container (doto (CAAT/ActorContainer.) 
                            (.setBackgroundImage basket-sprite)
-                           (.setLocation 490 320)
+                           (.setLocation x y)
                            (.setFillStyle "#ff3fff"))
         basket-body (doto (CAAT/Actor.)
                       (.setBackgroundImage basket-sprite) 
@@ -123,10 +166,16 @@
     (.addChild basket-container basket-body)
     (.addChild basket-container basket-head)
     (set! basket-container.isOpened false)
+    (set! basket-container.doMunch
+          (fn []
+            (basket-head-munch! basket-head)))
+    (set! basket-container.doTalk
+          (fn []
+            (basket-head-talk! basket-head)))
     (set! basket-container.doOpen
           (fn []
             (when (not this.isOpened)
-              (log/info logger "Opening basket")
+              ;; (log/info logger "Opening basket")
               (doto basket-head
                 (.addBehavior (gen-shaky-behavior basket-head))
                 (.addBehavior (gen-move-behavior basket-head :to {:up 30})))
@@ -139,7 +188,7 @@
     (set! basket-container.doClose
           (fn []
             (when this.isOpened
-              (log/info logger "Closing basket")
+              ;; (log/info logger "Closing basket")
               (doto basket-head
                 (. (emptyBehaviorList))
                 (.setRotation 0)
@@ -150,11 +199,15 @@
                               (.setValues scale-factor 1 scale-factor 1)))
               (set! this.isOpened false))))
     ;; make sure the sprite changes when the mouse hovers over the basket
-    (set! basket-body.mouseEnter (fn [mouseEvent] (. basket-container (doOpen))))
+    (set! basket-body.mouseEnter (fn [mouseEvent]
+                                   (. basket-container (doOpen))
+                                   ))
     (set! basket-body.mouseExit (fn [mouseEvent] (. basket-container (doClose))))
-    basket-container))
+    basket-container)) 
 
-(defn throw-into-basket [scene basket target] 
+(defn throw-into-basket
+  "Animate a TARGET by moving it into the BASKET."
+  [scene basket target] 
   (let [total-animation-time 400
         source (.modelToView target (CAAT/Point. 0 0))
         destination (.modelToView basket (CAAT/Point. 0 0))
@@ -164,7 +217,15 @@
                                    (fn [scene-time timer-time timetask]
                                      (.setExpired target scene-time))
                                    (fn []) (fn []))]
-    (log/info logger (str "Src: " source ";Dest: " destination))
+    ;; (log/info logger (str "Src: " source ";Dest: " destination))
+    (let [body (.getChildAt basket 0)
+          head (.getChildAt basket 1)]
+      (log/info logger (str "Head: " head ";Body: " body))
+      (basket-body-shake! body)
+      ;; TODO: have the basket do the talking after it has opened up
+      ;; (basket-head-talk! head)
+      )
+    (set! target.trashed true)
     (doto target
       (.enableEvents false)
       (.addBehavior (gen-move-behavior target :from [(.x source) (.y source)] :to [(.x destination) (.y destination)]))
@@ -173,10 +234,11 @@
                       (.setValues 1 0.1 1 0.1)))
       (.addBehavior (doto (CAAT/RotateBehavior.)
                       (.setFrameTime (.time target) total-animation-time)
-                      (.setValues 0 (* 2 Math/PI))) 0 0)
-      )))
+                      (.setValues 0 (* 2 Math/PI))) 0 0))))
 
-(defn draw-bubble [ctx x y w h radius]
+(defn draw-bubble
+  "Draw a speech bubble. With given width, height & corner radius."
+  [ctx x y w h radius bg-color]
   (let [r (+ x w)
         b (+ y h)]
     (set! ctx.strokeStyle "black")
@@ -194,19 +256,33 @@
     (.lineTo ctx x, (+ y radius))
     (.quadraticCurveTo ctx x, y, (+ x radius), y)
     (. ctx (stroke))
-    (set! ctx.fillStyle "#AABBAA")
+    (set! ctx.fillStyle bg-color)
     (. ctx (fill))
     ))
 
-(defn gen-bubble [director scene
-                  text & {:keys [x y w h radius text-size time] :or {text-size 20 x 0 y 0 w nil h nil radius 10
-                                                                     time nil}}]
+(defn gen-bubble
+  "Generate a speech bubble with some text in it. Must be passed
+  director, scene & text in that order. The text will be centered
+  inside the bubble. Other args are (as keywords):
+  :x - x position of bubble
+  :y - y position of bubble
+  :w - width of bubble. Will be computed based on :text-size if not given.
+  :h - height of bubble. Will be computed based on :text-size if not given.
+  :radius - radius of the corners. Higher means more round.
+  :text-size - Text size in pixels.
+  :time - Time in ms after which the bubble should expire."
+  [director scene text &
+   {:keys [x y w h radius text-size time bg-color]
+    :or {text-size 20 x 0 y 0 w
+         nil h nil radius 10 time nil
+         bg-color "#FFFFFF"}}]
   (log/info logger (str "Creating bubble with text: " text))
   (let [actor-container (doto (CAAT/ActorContainer.)
                           ;; (.setFillStyle "#FFFFFF")
+                          (.enableEvents false)
                           ) 
         text (doto (CAAT/TextActor.)
-               (.setFont (str text-size "px sans-serif")) 
+               (.setFont (str text-size "px Comic Sans MS")) 
                (.setText text)
                (. (create))
                (.calcTextSize director)
@@ -215,7 +291,9 @@
         h (or h (+ text.textHeight 30))
         bubble (doto (CAAT/Actor.)
                  (.setLocation 0 0)
-                 (.enableEvents false))]
+                 (.enableEvents false))
+        x (if (fn? x) (x w h) x)
+        y (if (fn? y) (y w h) y)]
     (.setBounds actor-container x y w h)
     (when time
       (.createTimer scene
@@ -226,7 +304,7 @@
                     (fn []) (fn [])))
     (set! bubble.paint
           (fn [director time]
-            (draw-bubble director.ctx 0 0 w h radius))) 
+            (draw-bubble director.ctx 0 0 w h radius bg-color))) 
     (doto actor-container
       (.addChild bubble)
       (.addChild text))
@@ -236,15 +314,140 @@
 
 (def *positive-feedbacks* ["Super!" "Genau!" "Ja, sehr richtig!" "Ja, weiter so!"])
 
+(defprotocol Container
+  (add!* [c obj]))
+
+(defn add! [c obj & {:keys [position] :or {position nil}}]
+  (when position
+    (.setLocation obj (x-of position) (y-of position)))
+  (add!* c obj))
+
+(extend-protocol Container
+  CAAT.ActorContainer
+  (add!* [c obj] (.addChildDelayed c obj)))
+
+(let [current {:object nil}]
+ (defn message!
+   "Print out a message using a speech bubble. The message will stay
+   for 2.5 seconds until it vanishes. A second call will remove any
+   currently displayed message first."
+   [director scene msg]
+   (when current.object
+     (log/info logger (str "Expiring old message bubble: " current.object))
+     (.setExpired current.object (.time scene)))
+   (let [new-message (gen-bubble
+                      director scene msg
+                      :x 20
+                      :y (fn [w h]
+                           (- (.height director) h 20)) :time 2500)]
+     (add! scene new-message)
+     (set! current.object new-message))))
+
+(defn pulsate! [target & {:keys [strength count total-time] :or {strength 1.1 count 1 total-time 200}}]
+  (let [time-offset (/ total-time count)
+        [strength-start strength-end] (if (vector? strength) strength [1 strength])]
+    (dotimes [i count]
+      (.addBehavior
+       target
+       (doto (CAAT/ScaleBehavior.)
+         (.setFrameTime (+ (.time target) (* i time-offset)) time-offset)
+         (.setValues strength-start strength-end strength-start strength-end)
+         (.setPingPong true))))))
+
+(defn gen-count-actor [total-count]
+  (let [data {}
+        actor (doto (CAAT/TextActor.) 
+                (.setFont "30px Comic Sans Ms")
+                (.setFillStyle "orange")
+                (.setOutline true)
+                (.setOutlineColor "black")
+                (.setLocation 640 90))]
+    (set! actor.mouseEnter
+          (fn [e] (pulsate! actor)))
+    (set! actor.inc
+          (fn []
+            (set! data.count (+ (or data.count -1) 1)) 
+            (.setText actor (str data.count "/" total-count))
+            (pulsate! actor :count 2 :strength 1.3)))
+    (. actor (inc))
+    actor))
+
+(defn make-draggable-into-basket
+  "Given a target, make it draggable in such a way that it can be
+  dragged ontop of the basket."
+  [target director scene basket counter]
+  (set! target.__mouseDrag target.mouseDrag)
+  (set! target.mouseDrag
+        (fn [event]
+          (let [point-in-basket (.modelToModel target (.point event) basket)]
+            (if (.contains basket (.x point-in-basket) (.y point-in-basket))
+              (when (. basket (doOpen))
+                (throw-into-basket scene basket target)
+                (. counter (inc))
+                (.audioPlay director "munching")
+                (. basket (doMunch))
+                ;; (message! director scene (rand-nth *positive-feedbacks*))
+                )
+              (. basket (doClose))))
+          (.__mouseDrag target event)))
+  (m/wrap target.mouseDown [e oldf]
+          (.audioPlay director "flopp")
+          (pulsate! target :strength [1.1 1.4]))
+  (m/wrap target.mouseUp [e oldf]
+          (.audioPlay director "doppp"))
+  (let [oldf target.mouseEnter]
+    (set! target.mouseEnter
+          (fn [e] 
+            (.addBehavior
+             target
+             (doto (CAAT/ScaleBehavior.)
+               (.setFrameTime (.time scene) 250)
+               (.setValues 1 1.1 1 1.1))) 
+            (oldf target e)))) 
+  (let [oldf target.mouseExit]
+    (set! target.mouseExit
+          (fn [e]
+            (when (not target.trashed)
+              (.addBehavior
+               target
+               (doto (CAAT/ScaleBehavior.)
+                 (.setFrameTime (.time scene) 250)
+                 (.setValues 1.1 1 1.1 1))))
+            (oldf target e))))
+  target)
+
+(defn gen-teddy [director]
+  (log/info logger (str "Creating teddy"))
+  (let [teddy-image (.getImage director "teddy") 
+        img (doto (CAAT/SpriteImage.)
+              (.initialize  teddy-image 1 3)
+              (.setSpriteIndex 0)
+              ;; (.setAnimationImageIndex (clj->js [0 1 0 2]))
+              (.setChangeFPS 150)
+              ) 
+        actor (doto (CAAT/Actor.)
+                (.setBackgroundImage img)
+                (.enableDrag true))]
+    (let [oldf actor.mouseEnter]
+      (set! actor.mouseEnter
+            (fn [e] 
+              (.setAnimationImageIndex img (clj->js [0 1 0 2]))
+              (oldf actor e))))
+    (let [oldf actor.mouseExit]
+      (set! actor.mouseExit
+            (fn [e]
+              (.setAnimationImageIndex img (clj->js [0]))
+              (oldf actor e))))
+    actor))
+
 (defn initialize-views
   "Accepts the form and greeting view HTML and adds them to the
   page. Animates the form sliding in from above. This function must be
   run before any other view functions. It may be called from any state
   to reset the UI."
-  [game-html form-html]
+  [game-html]
   (let [content (xpath "//div[@id='content']")]
     (log/info logger "Initializing View")
-    (log/info logger (pr-str image-data)) 
     (destroy-children! content)
     (set-html! content game-html)
     ;; a caat test
@@ -256,150 +459,34 @@
      "game-holder"
      (clj->js [{:id "room" :url "images/room.png"}
                {:id "basket" :url "images/basket.png"}
-               {:id "basket-head" :url "images/basket - head.png"}])
+               {:id "basket-head" :url "images/basket - head.png"}
+               {:id "teddy" :url "images/teddy_wave_animation_scaled.png"}])
      (fn [director]
        (log/info logger " Images loaded. Creating scene.")
+       (doto director
+         (.addAudio "chime" "sounds/22267__zeuss__the-chime.wav")
+         (.addAudio "kloing" "sounds/26875__cfork__cf-fx-batch-jingle-glock-n-kloing.wav")
+         (.addAudio "click" "sounds/39562__the-bizniss__mouse-click.wav")
+         (.addAudio "splat" "sounds/42960__freqman__splat-10.wav")
+         (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.wav")
+         (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.wav")
+         (.addAudio "munching" "sounds/27877__inequation__munching.wav"))
        (let [scene (. director (createScene))
              background (doto (CAAT/Actor.) 
-                          (.setBackgroundImage (.getImage director "room"))) 
-             basket (gen-basket director)
-             ball (doto (CAAT/ShapeActor.)
-                    (.setSize 50 50)
-                    (.setFillStyle "#ffffff")
-                    (.enableDrag true))] 
+                          (.setBackgroundImage (.getImage director "room")))
+             object-count 7
+             counter (gen-count-actor object-count)
+             basket (gen-basket director :x 440 :y 240)
+             objects (map (fn [index object]
+                            ;; make sure to pass mouse events to the basket
+                            (doto object
+                              (.setLocation (+ (rand-int 30) (* 80 index) 100) (+ (rand-int 60) 370)) 
+                              (make-draggable-into-basket director scene basket counter)))
+                          (range object-count)
+                          (take 7 (repeatedly (partial gen-teddy director))))] 
          (log/info logger " Displaying scene")
-
-         ;; make sure to pass mouse events to the basket
-         (set! ball.__mouseDrag ball.mouseDrag)
-         (set! ball.mouseDrag
-               (fn [event]
-                 (let [point-in-basket (.modelToModel ball (.point event) basket)]
-                   (if (.contains basket (.x point-in-basket) (.y point-in-basket))
-                     (when (. basket (doOpen))
-                       (throw-into-basket scene basket ball)
-                       (.addChildDelayed scene (gen-bubble director scene (rand-nth *positive-feedbacks*) :x 20 :y 20 :time 2500)))
-                     (. basket (doClose))))
-                 (.__mouseDrag ball event)))
-         
-         (.addChild scene background)
-         (.addChild scene basket)
-         (.addChild scene ball)
-         ;; (.addChild scene (gen-bubble director scene (rand-nth *positive-feedbacks*) :x 50 :y 20))
-          
-         ;; (.setScene director 0)
-         
-         ;; (.loop director 1)
-         )))
-    
-    
-    ;; (set-styles! (xpath cloud) {:opacity "0" :display "none" :margin-top "-500px"})
-    ;; (set-styles! (by-id "greet-button") {:opacity "0.2" :disabled true})
-    ;; (play form form-in {:after #(.focus (by-id "name-input") ())})
-    ))
-
-(comment ;; Try it
-
-  (initialize-views (:form one.sample.view/snippets)
-                    (:greeting one.sample.view/snippets))
-  
-  )
-
-(defn label-move-up
-  "Move the passed input field label above the input field. Run when
-  the field gets focus and is empty."
-  [label]
-  (play label [{:effect :color :end "#53607b" :time 200}
-               {:effect :slide :up 40 :time 200}]))
-
-(defn label-fade-out
-  "Make the passed input field label invisible. Run when the input
-  field loses focus and contains a valid input value."
-  [label]
-  (play label {:effect :fade :start 1 :end 0 :time 200}))
-
-(def move-down [{:effect :fade :end 1 :time 200}
-                {:effect :color :end "#BBC4D7" :time 200}
-                {:effect :slide :down 40 :time 200}])
-
-(def fade-in {:effect :fade :end 1 :time 400})
-
-(def fade-out {:effect :fade :start 1 :end 0 :time 400})
-
-(defn label-move-down
-  "Make the passed input field label visible and move it down into the
-  input field. Run when an input field loses focus and is empty."
-  [label]
-  (play label move-down))
-
-(comment ;; Examples of label effects.
-  
-  (label-move-up label)
-  (label-fade-out label)
-  (label-move-down label)
-  )
-
-(defn show-greeting
-  "Move the form out of view and the greeting into view. Run when the
-  submit button is clicked and the form has valid input."
-  []
-  (let [e {:effect :fade :start 1 :end 0 :time 500}]
-    (play-animation (parallel (bind form e)
-                              (bind label e) ; Since the label won't fade in IE
-                              (bind cloud
-                                    {:effect :color :time 500} ; Dummy animation for delay purposes
-                                    {:effect :fade-in-and-show :time 600}))
-                    {:before #(gforms/setDisabled (by-id "name-input") true)
-                     ;; We need this next one because IE8 won't hide the button
-                     :after #(set-styles! (by-id "greet-button") {:display "none"})})))
-
-(defn show-form
-  "Move the greeting cloud out of view and show the form. Run when the
-  back button is clicked from the greeting view."
-  []
-  (play-animation (serial (parallel (bind cloud {:effect :fade-out-and-hide :time 500})
-                                    (bind form
-                                          {:effect :color :time 300} ; Dummy animation for delay purposes
-                                          form-in)
-                                    (bind label fade-in move-down)))
-                  {;; Because IE8 won't hide the button, we need to
-                   ;; toggle it between displaying inline and none
-                   :before #(set-styles! (by-id "greet-button") {:display "inline"})
-                   :after #(do
-                             (gforms/setDisabled (by-id "name-input") false)
-                             (.focus (by-id "name-input") ()))}))
-
-(comment ;; Switch between greeting and form views
-
-  (label-move-up label)
-  (show-greeting)
-  (show-form)
-  )
-
-(defn disable-button
-  "Accepts an element id for a button and disables it. Fades the
-  button to 0.2 opacity."
-  [id]
-  (let [button (by-id id)]
-    (gforms/setDisabled button true)
-    (play button {:effect :fade :end 0.2 :time 400})))
-
-(defn enable-button
-  "Accepts an element id for a button and enables it. Fades the button
-  to an opactiy of 1."
-  [id]
-  (let [button (by-id id)]
-    (gforms/setDisabled button false)
-    (play button fade-in)))
-
-(comment ;; Examples of all effects
-
-  (initialize-views (:form one.sample.view/snippets)
-                    (:greeting one.sample.view/snippets))
-  (label-move-up label)
-  (label-fade-out label)
-  (show-greeting)
-  (show-form)
-
-  (disable-button "greet-button")
-  (enable-button "greet-button")
-  )
+         (add! scene background)
+         (add! scene basket)
+         (add! scene counter) 
+         (doseq [object objects]
+          (add! scene object)))))))
