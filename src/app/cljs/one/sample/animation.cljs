@@ -135,8 +135,7 @@
   (gen-behavior [s] s)
   cljs.core.Vector
   (gen-behavior [v]
-                (let [[kind & args] v]
-                  (log/info logger (str "Apply called on kind" kind))
+                (let [[kind & args] v] 
                   (apply (kind kw->behavior-fn) args))))
 
 (defn animation-specs->behavior
