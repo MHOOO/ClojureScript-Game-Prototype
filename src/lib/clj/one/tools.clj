@@ -10,6 +10,6 @@
   application and the host HTML page."
   [config]
   (build (:app-root config) (assoc (cljs-build-opts config)
-                              :optimizations :advanced
+                              :optimizations :simple;; :advanced
                               :output-to (str "out/" (production-js config))))
   (spit "out/public/index.html" (application-host config :production)))
