@@ -510,9 +510,13 @@ explicitly specified using a wait-spec)."
             (oldf target e))))
   target)
 
+(defn ->image [value director]
+  (cond (string? value) (.getImage director value)
+        (instance? CAAT.Image value) value))
+
 (defn gen-teddy [director]
   (log/info logger (str "Creating teddy"))
-  (let [teddy-image (.getImage director "teddy") 
+  (let [image (.getImage director "teddy") 
         img (doto (CAAT/SpriteImage.)
               (.initialize  teddy-image 1 3)
               (.setSpriteIndex 0)
@@ -534,6 +538,30 @@ explicitly specified using a wait-spec)."
               (oldf actor e))))
     actor))
 
+(defn gen-animated-actor
+  [director & {:keys [image animation-indices frame-time draggable?]
+               :or {image nil animation-indices [0] frame-time 150 draggable? false}}]
+  (let [image (->image image director) 
+        img (doto (CAAT/SpriteImage.)
+              (.initialize image 1 (+ 1 (apply max animation-indices))) 
+              (.setAnimationImageIndex (clj->js animation-indices))
+              (.setChangeFPS frame-time)) 
+        actor (doto (CAAT/Actor.)
+                (.setBackgroundImage img)
+                (.enableDrag true))]
+    (let [oldf actor.mouseEnter]
+      (set! actor.mouseEnter
+            (fn [e] 
+              (.setAnimationImageIndex img (clj->js animation-indices))
+              (oldf actor e))))
+    (let [oldf actor.mouseExit]
+      (set! actor.mouseExit
+            (fn [e]
+              (.setAnimationImageIndex img (clj->js [0]))
+              (oldf actor e))))
+    actor)
+  )
+ 
 (defn initialize-views
   "Accepts the form and greeting view HTML and adds them to the
   page. Animates the form sliding in from above. This function must be
@@ -554,12 +582,12 @@ explicitly specified using a wait-spec)."
      (clj->js [{:id "room" :url "images/room.png"}
                {:id "basket" :url "images/basket.png"}
                {:id "basket-head" :url "images/basket - head.png"}
-               {:id "teddy" :url "images/teddy_wave_animation_scaled.png"}])
+               {:id "teddy" :url "images/teddy_wave_animation_scaled.png"}
+               {:id "book" :url "images/book.png"}])
      (fn [director]
        (log/info logger " Images loaded. Creating scene.")
        (doto director
-         (.addAudio "chime" "sounds/22267__zeuss__the-chime.wav")
-         (.addAudio "kloing" "sounds/26875__cfork__cf-fx-batch-jingle-glock-n-kloing.wav")
+         (.addAudio "chime" "sounds/22267__zeuss__the-chime.wav") 
          (.addAudio "click" "sounds/39562__the-bizniss__mouse-click.wav")
          (.addAudio "splat" "sounds/42960__freqman__splat-10.wav")
          (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.wav")
@@ -577,10 +605,12 @@ explicitly specified using a wait-spec)."
                               (.setLocation (+ (rand-int 30) (* 80 index) 100) (+ (rand-int 60) 370)) 
                               (make-draggable-into-basket director scene basket counter)))
                           (range object-count)
-                          (take 7 (repeatedly (partial gen-teddy director))))] 
+                          (concat
+                           (take 2 (repeatedly (partial gen-animated-actor director)))
+                           (take 5 (repeatedly (partial gen-teddy director)))))] 
          (log/info logger " Displaying scene")
          (add! scene background)
          (add! scene basket)
          (add! scene counter) 
          (doseq [object objects]
-          (add! scene object)))))))
+           (add! scene object)))))))
