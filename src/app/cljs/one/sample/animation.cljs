@@ -728,7 +728,7 @@ explicitly specified using a wait-spec)."
              background (doto (CAAT/Actor.) 
                           (.setBackgroundImage (.getImage director "room")))
              object-count 7
-             counter (gen-count-actor object-count :on-total-reached (fn [e] (add! scene (gen-winning-screen director))))
+             counter (gen-count-actor object-count :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
              basket (gen-basket director :x 440 :y 240)
              objects (map (fn [index object]
                             ;; make sure to pass mouse events to the basket
