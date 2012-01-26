@@ -573,10 +573,11 @@ explicitly specified using a wait-spec)."
     actor))
 
 
-(defn fade! [target director & {:keys [duration] :or {duration 2000}}]
+(defn fade! [target director & {:keys [start-time duration]
+                                :or {start-time nil duration 2000}}]
   (doto target
     (.addBehavior (doto (CAAT/AlphaBehavior.)
-                    (.setFrameTime (.time director) duration)
+                    (.setFrameTime (or start-time (.time director)) duration)
                     (.setValues 1 0)))))
 
 (let [auto-expire-listener
@@ -623,7 +624,7 @@ explicitly specified using a wait-spec)."
      (fn [scene-time timer-time timetask]
        (dotimes [x batch-count]
          (let [rotation-direction (if (< (Math/random) 0.5) -1 1)
-               star (doto (gen-star :radius (rand-nth [12 14 16 18 20])
+               star (doto (gen-star :radius (rand-nth (map (comp dec dec dec) [12 14 16 18 20]))
                                     :color (rand-nth ["yellow" "chartreuse" "orange" "red" "powderblue" "magenta" "cyan"])) 
                       (.enableEvents false)
                       (.setLocation (+ (x-of start-position) (* x 10)) (+ (y-of start-position) (rand-int 30)))
@@ -635,7 +636,13 @@ explicitly specified using a wait-spec)."
                       ;; (animate [:rotate [:from 0 :to (+ 180 (* (* (rand-int 2) -1) (rand-int 180)))
                       ;;                    :time [scene-time 3000]]])
                       (fall! director :duration (+ 2000 (rand-int 1000)))
-                      (fade! director :duration (+ 3000 (rand-int 1000))))]
+                      (.addBehavior (doto (CAAT/AlphaBehavior.)
+                                      (.setFrameTime scene-time 500)
+                                      (.setValues 0 1))
+                                    )
+                      (fade! director
+                             :duration (+ 3000 (rand-int 1000))
+                             :start-time (+ scene-time 500)))]
            (add! target star)
            ;; randomize the star z
            (.setZOrder target star (- (rand-int batch-count) (/ batch-count 2)))
@@ -683,13 +690,13 @@ explicitly specified using a wait-spec)."
                        [:rotate [:from r2 :to 0 :time 1000]]
                        (fn [t] (animate-text)))))]
       (animate-text))
-    (dotimes [i 6]
+    (dotimes [i 11]
       (repeatedly-create-stars
        container scene
-       :start-time (* i 150)
+       :start-time (* i 100)
        :repeat-interval 2000
-       :batch-count 10
-       :start-position [(* 100 (+ 1 i))
+       :batch-count 5
+       :start-position [(* 60 (+ 1 i))
                         (+ 50 (* (mod i 2) 50))]))
     container))
  
