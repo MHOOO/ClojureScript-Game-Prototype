@@ -312,8 +312,7 @@ explicitly specified using a wait-spec)."
                       :on-finish
                       (fn []
                         (. counter (inc))
-                        (.audioPlay director "chime")
-                        ;; TODO: have the basket do the talking after it has opened up
+                        (.audioPlay director "chime") 
                         (basket-head-talk! head)
                         (.enableEvents basket true)
                         (set! basket.eating false)
@@ -356,7 +355,7 @@ explicitly specified using a wait-spec)."
     (.quadraticCurveTo ctx x, y, (+ x radius), y)
     (. ctx (stroke))
     (set! ctx.fillStyle bg-color)
-    (. ctx (fill))
+    (. ctx (fill)) 
     ))
 
 (defn gen-bubble
@@ -403,7 +402,8 @@ explicitly specified using a wait-spec)."
                     (fn []) (fn [])))
     (set! bubble.paint
           (fn [director time]
-            (draw-bubble director.ctx 0 0 w h radius bg-color))) 
+            (draw-bubble director.ctx 0 0 w h radius bg-color)))
+    (. bubble (cacheAsBitmap))
     (doto actor-container
       (.addChild bubble)
       (.addChild text))
@@ -452,7 +452,7 @@ explicitly specified using a wait-spec)."
          (.setValues strength-start strength-end strength-start strength-end)
          (.setPingPong true))))))
 
-(defn gen-count-actor [total-count]
+(defn gen-count-actor [total-count & {:keys [on-total-reached] :or {on-total-reached (fn [c])}}]
   (let [data {}
         actor (doto (CAAT/TextActor.) 
                 (.setFont "30px Comic Sans Ms")
@@ -466,7 +466,9 @@ explicitly specified using a wait-spec)."
           (fn []
             (set! data.count (+ (or data.count -1) 1)) 
             (.setText actor (str data.count "/" total-count))
-            (pulsate! actor :count 2 :strength 1.3)))
+            (pulsate! actor :count 2 :strength 1.3)
+            (when (== data.count total-count)
+              (on-total-reached total-count))))
     (. actor (inc))
     actor))
 
@@ -489,6 +491,7 @@ explicitly specified using a wait-spec)."
           (pulsate! target :strength [1.1 1.4]))
   (m/wrap target.mouseUp [e oldf]
           (.audioPlay director "doppp"))
+  (.setDiscardable target true)
   (let [oldf target.mouseEnter]
     (set! target.mouseEnter
           (fn [e] 
@@ -511,40 +514,48 @@ explicitly specified using a wait-spec)."
   target)
 
 (defn ->image [value director]
+  ;; (log/info logger (str "->image " value))
   (cond (string? value) (.getImage director value)
         (instance? CAAT.Image value) value))
 
-(defn gen-teddy [director]
-  (log/info logger (str "Creating teddy"))
-  (let [image (.getImage director "teddy") 
-        img (doto (CAAT/SpriteImage.)
-              (.initialize  teddy-image 1 3)
-              (.setSpriteIndex 0)
-              ;; (.setAnimationImageIndex (clj->js [0 1 0 2]))
-              (.setChangeFPS 150)
-              ) 
-        actor (doto (CAAT/Actor.)
-                (.setBackgroundImage img)
-                (.enableDrag true))]
-    (let [oldf actor.mouseEnter]
-      (set! actor.mouseEnter
-            (fn [e] 
-              (.setAnimationImageIndex img (clj->js [0 1 0 2]))
-              (oldf actor e))))
-    (let [oldf actor.mouseExit]
-      (set! actor.mouseExit
-            (fn [e]
-              (.setAnimationImageIndex img (clj->js [0]))
-              (oldf actor e))))
+
+(defn draw-star [context & {:keys [radius color] :or {radius 80 color "green"}}]
+  ;; (set! context.strokeStyle "black")
+  ;; (set! context.lineWidth 2)
+  (set! context.fillStyle color)
+  (set! context.shadowColor color)
+  (set! context.shadowBlur (/ radius 3))
+  (. context (beginPath))
+  (. context (moveTo 0 radius))
+  (dotimes [n 10]
+    (let [radius (if (== (mod n 2) 0) radius (* 0.5 radius))
+          x (* radius (Math/sin (/ (* n 2 Math/PI) 10)))
+          y (* radius (Math/cos (/ (* n 2 Math/PI) 10)))]
+     (.lineTo context x y)))
+  (. context (closePath))
+  (. context (fill)) 
+  ;; (. context (stroke))
+  )
+
+(defn gen-star [& {:keys [radius color] :or {radius 80 color "green"}}]
+  (let [actor (doto (CAAT/Actor.)
+                (.setBounds 0 0 radius radius))]
+    (m/wrap actor.paint [director time oldf]
+          (draw-star director.ctx :radius radius :color color))
+    ;; (. actor (cacheAsBitmap))
+    ;; (.enableDrag actor true)
     actor))
+
+
 
 (defn gen-animated-actor
   [director & {:keys [image animation-indices frame-time draggable?]
                :or {image nil animation-indices [0] frame-time 150 draggable? false}}]
+  (log/info logger (str "Creating actor"))
   (let [image (->image image director) 
         img (doto (CAAT/SpriteImage.)
               (.initialize image 1 (+ 1 (apply max animation-indices))) 
-              (.setAnimationImageIndex (clj->js animation-indices))
+              (.setAnimationImageIndex (clj->js [0]))
               (.setChangeFPS frame-time)) 
         actor (doto (CAAT/Actor.)
                 (.setBackgroundImage img)
@@ -559,8 +570,64 @@ explicitly specified using a wait-spec)."
             (fn [e]
               (.setAnimationImageIndex img (clj->js [0]))
               (oldf actor e))))
-    actor)
-  )
+    actor))
+
+
+(defn fade! [target director & {:keys [duration] :or {duration 2000}}]
+  (doto target
+    (.addBehavior (doto (CAAT/AlphaBehavior.)
+                    (.setFrameTime (.time director) duration)
+                    (.setValues 1 0)))))
+
+(defn fall! [target director & {:keys [duration] :or {duration 2000}}]
+  (let [cpX (+ (.x target) (- (rand-int 200) 100))
+        cpY (+ (.y target) (- (rand-int 200) 100))
+        nX (+ (.x target) (* 2 (- cpX (.x target))))
+        nY (+ (.height director) 10)]
+    (doto target
+      (.setDiscardable true)
+      (.addBehavior (doto (CAAT/PathBehavior.)
+                      (.setFrameTime (.time director) duration)
+                      (.setPath (doto (CAAT/Path.)
+                                  (.beginPath (.x target) (.y target))
+                                  (.addQuadricTo cpX cpY nX nY)
+                                  (. (endPath))))
+                      (.addListener
+                       (clj->js
+                        {:behaviorExpired
+                         (fn [bh t a] 
+                           (.setExpired target true))})))))))
+
+(defn gen-winning-screen [director]
+  (let [mask (doto (CAAT/ShapeActor.)
+               (.setShape CAAT.ShapeActor.prototype.SHAPE_RECTANGLE) 
+               (.setBounds 0 0 (.width director) (.height director)) 
+               (.setFillStyle "#000000")
+               (.setAlpha 0.7))
+        text (doto (CAAT/TextActor.)
+               (.setText "GEWONNEN!")
+               (.setFont "90px Comic Sans Ms")
+               (.setFillStyle "orange")
+               (.setOutline true)
+               (.setOutlineColor "black")
+               (.calcTextSize director)
+               (.centerAt (/ (.width director) 2) (/ (.height director) 2)))
+        container (doto (CAAT/ActorContainer.) 
+                    (add! mask)
+                    (add! text))]
+    (m/wrap text.paint [director time default]
+            (let [ctx (.ctx director)]
+              (set! ctx.shadowColor "yellow")
+              (set! ctx.shadowBlur 20)
+              (default text director time)))
+    (dotimes [x 40]
+      (add! container (doto (gen-star :radius (rand-nth [12 14 16 18 20])
+                                      :color (rand-nth ["yellow" "green" "orange" "red" "blue"])) 
+                        (.setLocation (+ 200 (* x 10)) (+ 170 (rand-int 30)))
+                        (. (cacheAsBitmap))
+                        (fall! director :duration (+ 2000 (rand-int 1000)))
+                        (fade! director :duration (+ 3000 (rand-int 1000))))))
+    container))
  
 (defn initialize-views
   "Accepts the form and greeting view HTML and adds them to the
@@ -597,7 +664,7 @@ explicitly specified using a wait-spec)."
              background (doto (CAAT/Actor.) 
                           (.setBackgroundImage (.getImage director "room")))
              object-count 7
-             counter (gen-count-actor object-count)
+             counter (gen-count-actor object-count :on-total-reached (fn [e] (add! scene (gen-winning-screen director))))
              basket (gen-basket director :x 440 :y 240)
              objects (map (fn [index object]
                             ;; make sure to pass mouse events to the basket
@@ -606,11 +673,13 @@ explicitly specified using a wait-spec)."
                               (make-draggable-into-basket director scene basket counter)))
                           (range object-count)
                           (concat
-                           (take 2 (repeatedly (partial gen-animated-actor director)))
-                           (take 5 (repeatedly (partial gen-teddy director)))))] 
+                           (take 2 (repeatedly (partial gen-animated-actor director :image "book" :animation-indices [2 0 1 0] :draggable? true)))
+                           (take 5 (repeatedly (partial gen-animated-actor director :image "teddy" :animation-indices [0 1 0 2] :draggable? true)))))] 
          (log/info logger " Displaying scene")
          (add! scene background)
          (add! scene basket)
          (add! scene counter) 
+         
          (doseq [object objects]
-           (add! scene object)))))))
+           (add! scene object))
+         (add! scene (gen-winning-screen director)))))))

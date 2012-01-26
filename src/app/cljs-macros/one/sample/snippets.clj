@@ -18,11 +18,11 @@
 
 (defmacro wrap
   [target-sym arglist & body]
-  `(let [~'oldf ~target-sym]
+  `(let [oldf# ~target-sym]
      (set!
       ~target-sym
       (fn [& args#]
-        (let [~arglist args#]
+        (let [~arglist (concat args# [(fn [inst# & args2#] (.apply oldf# inst# (~'clj->js args2#)))])]
           ~@body))
       ))
   )
