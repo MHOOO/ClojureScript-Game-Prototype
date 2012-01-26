@@ -579,27 +579,78 @@ explicitly specified using a wait-spec)."
                     (.setFrameTime (.time director) duration)
                     (.setValues 1 0)))))
 
-(defn fall! [target director & {:keys [duration] :or {duration 2000}}]
-  (let [cpX (+ (.x target) (- (rand-int 200) 100))
-        cpY (+ (.y target) (- (rand-int 200) 100))
-        nX (+ (.x target) (* 2 (- cpX (.x target))))
-        nY (+ (.height director) 10)]
-    (doto target
-      (.setDiscardable true)
-      (.addBehavior (doto (CAAT/PathBehavior.)
-                      (.setFrameTime (.time director) duration)
-                      (.setPath (doto (CAAT/Path.)
-                                  (.beginPath (.x target) (.y target))
-                                  (.addQuadricTo cpX cpY nX nY)
-                                  (. (endPath))))
-                      (.addListener
-                       (clj->js
-                        {:behaviorExpired
-                         (fn [bh t a] 
-                           (.setExpired target true))})))))))
+(let [auto-expire-listener
+      (clj->js
+       {:behaviorExpired
+        (fn [bh t a] 
+          (.setExpired a true))})]
+  (defn fall! [target director & {:keys [duration] :or {duration 2000}}]
+    (let [cpX (+ (.x target) (- (rand-int 200) 100))
+          cpY (+ (.y target) (- (rand-int 200) 100))
+          nX (+ (.x target) (* 2 (- cpX (.x target))))
+          nY (+ (.height director) 10)]
+      (doto target
+        (.setDiscardable true)
+        (.addBehavior (doto (CAAT/PathBehavior.)
+                        (.setFrameTime (.time director) duration)
+                        (.setPath (doto (CAAT/Path.)
+                                    (.beginPath (.x target) (.y target))
+                                    (.addQuadricTo cpX cpY nX nY)
+                                    (. (endPath))))
+                        (.addListener auto-expire-listener)))))))
 
-(defn gen-winning-screen [director]
-  (let [mask (doto (CAAT/ShapeActor.)
+(defn director-of [what]
+  (cond (instance? CAAT.Scene what) (.parent what)
+        (instance? CAAT.ActorContainer what) (director-of (.parent what))
+        (instance? CAAT.Actor what) (director-of (.parent what))
+        true nil))
+
+(defn scene-of [what]
+  (cond (instance? CAAT.Scene what) what
+        (instance? CAAT.ActorContainer what) (scene-of (.parent what))
+        (instance? CAAT.Actor what) (scene-of (.parent what))
+        true nil))
+
+(defn repeatedly-create-stars [target scene &
+                               {:keys [start-time start-position batch-count repeat-interval]
+                                :as kw
+                                :or {start-time 0 batch-count 30 start-position [400 50] repeat-interval 2000}}]
+  (let [director (director-of scene)] 
+    (.createTimer
+     scene
+     (.time scene)
+     start-time
+     (fn [scene-time timer-time timetask]
+       (dotimes [x batch-count]
+         (let [rotation-direction (if (< (Math/random) 0.5) -1 1)
+               star (doto (gen-star :radius (rand-nth [12 14 16 18 20])
+                                    :color (rand-nth ["yellow" "chartreuse" "orange" "red" "powderblue" "magenta" "cyan"])) 
+                      (.enableEvents false)
+                      (.setLocation (+ (x-of start-position) (* x 10)) (+ (y-of start-position) (rand-int 30)))
+                      ;; (. (cacheAsBitmap))
+                      (.addBehavior
+                       (gen-rotate-behavior :from 0 :to (* rotation-direction (+ 180 (* (* (rand-int 2) -1) (rand-int 180))))
+                                            :time [scene-time 3000]))
+                      ;; TODO: why is the following not working? (rotation stops after some seconds)
+                      ;; (animate [:rotate [:from 0 :to (+ 180 (* (* (rand-int 2) -1) (rand-int 180)))
+                      ;;                    :time [scene-time 3000]]])
+                      (fall! director :duration (+ 2000 (rand-int 1000)))
+                      (fade! director :duration (+ 3000 (rand-int 1000))))]
+           (add! target star)
+           ;; randomize the star z
+           (.setZOrder target star (- (rand-int batch-count) (/ batch-count 2)))
+           ))
+       (repeatedly-create-stars target scene
+              :start-time repeat-interval
+              :start-position start-position
+              :batch-count batch-count
+              :repeat-interval repeat-interval)
+       )
+     (fn []) (fn []))))
+
+(defn gen-winning-screen [scene]
+  (let [director (director-of scene) 
+        mask (doto (CAAT/ShapeActor.)
                (.setShape CAAT.ShapeActor.prototype.SHAPE_RECTANGLE) 
                (.setBounds 0 0 (.width director) (.height director)) 
                (.setFillStyle "#000000")
@@ -614,19 +665,32 @@ explicitly specified using a wait-spec)."
                (.centerAt (/ (.width director) 2) (/ (.height director) 2)))
         container (doto (CAAT/ActorContainer.) 
                     (add! mask)
-                    (add! text))]
+                    (add! text)
+                    (.setZOrder text 8)
+                    (.enableEvents false))]
     (m/wrap text.paint [director time default]
             (let [ctx (.ctx director)]
               (set! ctx.shadowColor "yellow")
               (set! ctx.shadowBlur 20)
               (default text director time)))
-    (dotimes [x 40]
-      (add! container (doto (gen-star :radius (rand-nth [12 14 16 18 20])
-                                      :color (rand-nth ["yellow" "green" "orange" "red" "blue"])) 
-                        (.setLocation (+ 200 (* x 10)) (+ 170 (rand-int 30)))
-                        (. (cacheAsBitmap))
-                        (fall! director :duration (+ 2000 (rand-int 1000)))
-                        (fade! director :duration (+ 3000 (rand-int 1000))))))
+    (let [animate-text
+          (fn animate-text []
+            (let [r1 (+ 1 (rand-int 4))
+                  r2 (- (+ 1 (rand-int 4)))]
+              (animate text
+                       [:rotate [:from 0 :to r1 :time 1000]]
+                       [:rotate [:from r1 :to r2 :time 1000]]
+                       [:rotate [:from r2 :to 0 :time 1000]]
+                       (fn [t] (animate-text)))))]
+      (animate-text))
+    (dotimes [i 6]
+      (repeatedly-create-stars
+       container scene
+       :start-time (* i 150)
+       :repeat-interval 2000
+       :batch-count 10
+       :start-position [(* 100 (+ 1 i))
+                        (+ 50 (* (mod i 2) 50))]))
     container))
  
 (defn initialize-views
@@ -682,4 +746,5 @@ explicitly specified using a wait-spec)."
          
          (doseq [object objects]
            (add! scene object))
-         (add! scene (gen-winning-screen director)))))))
+         ;; (add! scene (gen-winning-screen scene))
+         )))))
