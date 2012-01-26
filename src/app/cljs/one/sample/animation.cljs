@@ -114,6 +114,13 @@
                   (y-of rotation-anchor)
                   ))))
 
+(defn gen-scale-behavior [& {:keys [from to time]
+                             :or {from 0 to 0 time 120}}]
+  (let [[start-time time] (if (vector? time) time [0 time])]
+    (doto (CAAT/ScaleBehavior.)
+      (.setFrameTime start-time time) 
+      (.setValues from to from to))))
+
 (defn gen-parallel-behavior [& args]
   (let [container (doto (CAAT/ContainerBehavior.)
                     (.setFrameTime 0 Number.MAX_VALUE))] 
@@ -125,6 +132,7 @@
 
 (def kw->behavior-fn {:move (fn [arg] (apply gen-move-behavior arg))
                       :rotate (fn [arg] (apply gen-rotate-behavior arg))
+                      :scale (fn [arg] (apply gen-scale-behavior arg))
                       :parallel gen-parallel-behavior})
 
 (defprotocol AAnimationSpec
@@ -411,7 +419,7 @@ explicitly specified using a wait-spec)."
 
     actor-container))
 
-(def *positive-feedbacks* ["Super!" "Genau!" "Ja, sehr richtig!" "Ja, weiter so!"])
+(def *positive-feedbacks* ["Super!" "Genau!" "Ja, sehr richtig!" "Ja, weiter so!" "Mmm, lecker!" "Au ja!"])
 
 (defprotocol Container
   (add!* [c obj]))
@@ -613,15 +621,16 @@ explicitly specified using a wait-spec)."
         true nil))
 
 (defn repeatedly-create-stars [target scene &
-                               {:keys [start-time start-position batch-count repeat-interval]
+                               {:keys [start-time start-position batch-count repeat-interval on-create]
                                 :as kw
-                                :or {start-time 0 batch-count 30 start-position [400 50] repeat-interval 2000}}]
+                                :or {start-time 0 batch-count 30 start-position [400 50] repeat-interval 2000 on-create (fn [t])}}]
   (let [director (director-of scene)] 
     (.createTimer
      scene
      (.time scene)
      start-time
      (fn [scene-time timer-time timetask]
+       (on-create scene-time)
        (dotimes [x batch-count]
          (let [rotation-direction (if (< (Math/random) 0.5) -1 1)
                star (doto (gen-star :radius (rand-nth (map (comp dec dec dec) [12 14 16 18 20]))
@@ -645,13 +654,14 @@ explicitly specified using a wait-spec)."
                              :start-time (+ scene-time 500)))]
            (add! target star)
            ;; randomize the star z
-           (.setZOrder target star (- (rand-int batch-count) (/ batch-count 2)))
+           (.setZOrder target star (- (rand-int batch-count) (/ batch-count 2))) 
            ))
        (repeatedly-create-stars target scene
               :start-time repeat-interval
               :start-position start-position
               :batch-count batch-count
-              :repeat-interval repeat-interval)
+              :repeat-interval repeat-interval
+              :on-create on-create)
        )
      (fn []) (fn []))))
 
@@ -663,18 +673,71 @@ explicitly specified using a wait-spec)."
                (.setFillStyle "#000000")
                (.setAlpha 0.7))
         text (doto (CAAT/TextActor.)
-               (.setText "GEWONNEN!")
+               (.setText (rand-nth ["PRIMA!" "SUPER!" "TOLL!"]))
                (.setFont "90px Comic Sans Ms")
                (.setFillStyle "orange")
                (.setOutline true)
                (.setOutlineColor "black")
                (.calcTextSize director)
                (.centerAt (/ (.width director) 2) (/ (.height director) 2)))
-        container (doto (CAAT/ActorContainer.) 
+        subtext (doto (CAAT/TextActor.)
+                  (.setText "Du hast ein Lied freigespielt.")
+                  (.setFont "30px Comic Sans Ms")
+                  (.setFillStyle "yellow")
+                  (.setAlpha 0.7)
+                  (.setOutline true)
+                  (.setOutlineColor "black")
+                  (.calcTextSize director)
+                  (.centerAt (/ (.width director) 2) (/ (.height director) 2)))
+        song-subtext
+        (doto (CAAT/TextActor.)
+          (.setText "Name: The Sound of Music 3 - Author: larrylarrybb")
+          (.setFont "20px Comic Sans Ms")
+          (.setFillStyle "red")
+          (.setAlpha 0.7)
+          (.setOutline true)
+          (.setOutlineColor "black")
+          (.calcTextSize director)
+          (.centerAt (/ (.width director) 2) (/ (.height director) 2)))
+        ;; img-utils (CAAT.modules.ImageUtil/createThumb )
+        song (.getAudio (. director (getAudioManager)) "song")
+        song-supported? (and song (not (not (and song.canPlayType (.replace (.canPlayType song "audio/mpeg;") #"no" "")))))
+        song-playing? (atom false)
+        play-icon (let [img (CAAT.modules.ImageUtil/createThumb (.getImage director "play") 35 35 true)
+                        img2 (CAAT.modules.ImageUtil/createThumb (.getImage director "stop") 35 35 true)
+                        actor (doto (CAAT/Actor.)
+                                (.setBackgroundImage img))
+                        audio-loop (atom nil)] 
+                    (set! actor.mouseClick
+                          (fn [e]
+                            (if (not @song-playing?)
+                              (do (reset! song-playing? true)
+                                  (log/info logger (pr-str "Playing song" song))
+                                  (reset! audio-loop (.audioLoop director "song"))
+                                  (.setBackgroundImage actor img2))
+                              (do (reset! song-playing? false)
+                                  (log/info logger "Stopping song playback")
+                                  (. @audio-loop (pause))
+                                  (reset! audio-loop nil)
+                                  (.setBackgroundImage actor img)))))
+                    actor)
+        container (doto (CAAT/ActorContainer.)
+                    (.setBounds 0 0 (.width director) (.height director))
                     (add! mask)
-                    (add! text)
-                    (.setZOrder text 8)
-                    (.enableEvents false))]
+                    (add! text) 
+                    ;; (.setZOrder text 8)
+                    ;; (.enableEvents true)
+                    )]
+    (if song-supported?
+      (doto container
+        (add! play-icon)
+        (add! subtext) 
+        (add! song-subtext)))
+    ;; put the subtext beneath the main text
+    (.setLocation subtext (.x subtext) (+ (.y text) (.textHeight text) 10))
+    (.setLocation song-subtext (.x subtext) (+ (.y text) 220 10))
+    (.centerAt play-icon (/ (.width director) 2) (+ 140 (/ (.height director) 2)))
+    ;; (.setLocation play-icon (+ (.x subtext) (.textWidth subtext)) (+ (.y subtext) 5))
     (m/wrap text.paint [director time default]
             (let [ctx (.ctx director)]
               (set! ctx.shadowColor "yellow")
@@ -688,8 +751,15 @@ explicitly specified using a wait-spec)."
                        [:rotate [:from 0 :to r1 :time 1000]]
                        [:rotate [:from r1 :to r2 :time 1000]]
                        [:rotate [:from r2 :to 0 :time 1000]]
-                       (fn [t] (animate-text)))))]
-      (animate-text))
+                       (fn [t] (animate-text)))))
+          animate-text2
+          (fn animate-text []
+            (animate text
+                     [:scale [:from 1 :to 1.05 :time 1000]]
+                     [:scale [:from 1.05 :to 1 :time 1000]]
+                     (fn [t] (animate-text))))]
+      (animate-text)
+      (animate-text2)) 
     (dotimes [i 11]
       (repeatedly-create-stars
        container scene
@@ -697,7 +767,17 @@ explicitly specified using a wait-spec)."
        :repeat-interval 2000
        :batch-count 5
        :start-position [(* 60 (+ 1 i))
-                        (+ 50 (* (mod i 2) 50))]))
+                        (+ 50 (* (mod i 2) 50))]
+       ;; play a sound which gets gradually more silent
+       :on-create (if (== i 0)
+                    (let [volume (atom 1)]
+                      (fn [t]
+                        (when (not @song-playing?)
+                         (let [sound (.getAudio (. director (getAudioManager)) "chime")]
+                           (.audioPlay director "chime")
+                           (set! sound.volume @volume)
+                           (reset! volume (max 0.2 (- @volume 0.2))))))) (fn [t]))
+       ))
     container))
  
 (defn initialize-views
@@ -721,7 +801,9 @@ explicitly specified using a wait-spec)."
                {:id "basket" :url "images/basket.png"}
                {:id "basket-head" :url "images/basket - head.png"}
                {:id "teddy" :url "images/teddy_wave_animation_scaled.png"}
-               {:id "book" :url "images/book.png"}])
+               {:id "book" :url "images/book.png"}
+               {:id "play" :url "images/1194999000504424746player_play.svg.thumb.png"}
+               {:id "stop" :url "images/1194999023691726266player_stop.svg.thumb.png"}])
      (fn [director]
        (log/info logger " Images loaded. Creating scene.")
        (doto director
@@ -730,7 +812,8 @@ explicitly specified using a wait-spec)."
          (.addAudio "splat" "sounds/42960__freqman__splat-10.wav")
          (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.wav")
          (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.wav")
-         (.addAudio "munching" "sounds/27877__inequation__munching.wav"))
+         (.addAudio "munching" "sounds/27877__inequation__munching.wav")
+         (.addAudio "song" "sounds/448614_Happiness_Alone.mp3"))
        (let [scene (. director (createScene))
              background (doto (CAAT/Actor.) 
                           (.setBackgroundImage (.getImage director "room")))
@@ -753,5 +836,5 @@ explicitly specified using a wait-spec)."
          
          (doseq [object objects]
            (add! scene object))
-         ;; (add! scene (gen-winning-screen scene))
+         (add! scene (gen-winning-screen scene))
          )))))

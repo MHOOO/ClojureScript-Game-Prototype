@@ -7,3 +7,5 @@
     - flopp: http://www.freesound.org/people/cfork/sounds/8006/
     - doppp: http://www.freesound.org/people/cfork/sounds/8001/
     - splat: http://www.freesound.org/people/FreqMan/sounds/42960/
+  - Non-Commercial + Attribution    
+    - The Sound of Magic 3: http://www.newgrounds.com/audio/listen/448614

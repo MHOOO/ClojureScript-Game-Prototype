@@ -2404,7 +2404,7 @@ var cp1= proxy(
      *
      * <p>
      * For am exponential interpolation, the getPosition function would look like this:
-     * <code>function getPosition(time) { return { x:time, y: Math.pow(time,2) }Ê}</code>.
+     * <code>function getPosition(time) { return { x:time, y: Math.pow(time,2) }ï¾Š}</code>.
      * meaning that for time=0.5, a value of 0,5*0,5 should use instead.
      *
      * <p>
@@ -3369,7 +3369,7 @@ var cp1= proxy(
                 if ( /*!bh.expired*/ bh.status!==CAAT.Behavior.Status.EXPIRED && !(bh instanceof CAAT.GenericBehavior) ) {
 
                     // ajustar tiempos:
-                    //  time es tiempo normalizado a duraci—n de comportamiento contenedor.
+                    //  time es tiempo normalizado a duraciæº¶ de comportamiento contenedor.
                     //      1.- desnormalizar
                     time= referenceTime * this.behaviorDuration;
 
@@ -3747,7 +3747,7 @@ var cp1= proxy(
          * 
          * @param time the time to apply the scale for.
          * @param actor the target actor to Scale.
-         * @return {object} an object of the form <code>{ scaleX: {float}, scaleY: {float}Ê}</code>
+         * @return {object} an object of the form <code>{ scaleX: {float}, scaleY: {float}ï¾Š}</code>
          */
 		setForTime : function(time,actor) {
 
@@ -4068,7 +4068,7 @@ var cp1= proxy(
          * If autoRotate=true, the actor is rotated as well. The rotation anchor will (if set) always be ANCHOR_CENTER.
          * @param time an integer indicating the time the behavior is being applied at.
          * @param actor a CAAT.Actor instance to be translated.
-         * @return {object} an object of the form <code>{ x: {float}, y: {float}Ê}</code>.
+         * @return {object} an object of the form <code>{ x: {float}, y: {float}ï¾Š}</code>.
          */
 		setForTime : function(time,actor) {
 
@@ -4215,7 +4215,7 @@ var cp1= proxy(
          *
          * @param time the time to apply the scale for.
          * @param actor the target actor to Scale.
-         * @return {object} an object of the form <code>{ scaleX: {float}, scaleY: {float}Ê}</code>
+         * @return {object} an object of the form <code>{ scaleX: {float}, scaleY: {float}ï¾Š}</code>
          */
 		setForTime : function(time,actor) {
 
@@ -8146,6 +8146,7 @@ var cp1= proxy(
                 var channel= this.channels.shift();
                 channel.src= audio.src;
                 channel.load();
+                channel.volume=audio.volume;
                 channel.play();
                 this.workingChannels.push(channel);
             }
@@ -9907,7 +9908,7 @@ var cp1= proxy(
          *    will have their areas redrawn.
          *  + CAAT.Director.CLEAR_NONE. clears nothing.
          *
-         * @param clear {CAAT.Director.CLEAR_ALL |ÊCAAT.Director.CLEAR_NONE | CAAT.Director.CLEAR_DIRTY_RECTS}
+         * @param clear {CAAT.Director.CLEAR_ALL |ï¾ŠCAAT.Director.CLEAR_NONE | CAAT.Director.CLEAR_DIRTY_RECTS}
          * @return this.
          */
         setClear : function(clear) {
@@ -13173,7 +13174,7 @@ CAAT.modules.CircleManager = CAAT.modules.CircleManager || {};/**
          * Transparent means that every scan pixel is alpha=0.
          * @param image
          * @param threshold {integer} any value below or equal to this will be optimized.
-         * @param !areas { object{ top<boolean>, bottom<boolean>, left<boolean, right<boolean> }Ê}
+         * @param !areas { object{ top<boolean>, bottom<boolean>, left<boolean, right<boolean> }ï¾Š}
          */
     CAAT.modules.ImageUtil.optimize= function(image, threshold, areas ) {
         threshold>>=0;
@@ -16931,11 +16932,11 @@ function makeOrtho(left, right, bottom, top, znear, zfar) {
 
             while( initialPosition<=this.scanMapHeight-height) {
 
-                // para buscar sitio se buscar‡ un sitio hasta el tama–o de alto del trozo.
+                // para buscar sitio se buscar‡ un sitio hasta el tamaæ’² de alto del trozo.
                 // mas abajo no va a caber.
 
                 // fitHorizontalPosition es un array con todas las posiciones de este scan donde
-                // cabe un chunk de tama–o width.
+                // cabe un chunk de tamaæ’² width.
                 var fitHorizontalPositions= null;
                 var foundPositionOnScan=    false;
 
@@ -16943,7 +16944,7 @@ function makeOrtho(left, right, bottom, top, znear, zfar) {
                     fitHorizontalPositions= this.scanMap[ initialPosition ].findWhereFits( width );
 
                     // si no es nulo el array de resultados, quiere decir que en alguno de los puntos
-                    // nos cabe un trozo de tama–o width.
+                    // nos cabe un trozo de tamaæ’² width.
                     if ( null!==fitHorizontalPositions && fitHorizontalPositions.length>0 ) {
                         foundPositionOnScan= true;
                         break;
@@ -16951,9 +16952,9 @@ function makeOrtho(left, right, bottom, top, znear, zfar) {
                 }
 
                 if ( foundPositionOnScan ) {
-                    // j es el scan donde cabe un trozo de tama–o width.
+                    // j es el scan donde cabe un trozo de tamaæ’² width.
                     // comprobamos desde este scan que en todos los scan verticales cabe el trozo.
-                    // se comprueba que cabe en alguno de los tama–os que la rutina de busqueda horizontal
+                    // se comprueba que cabe en alguno de los tamaæ’²s que la rutina de busqueda horizontal
                     // nos ha devuelto antes.
 
                     var minInitialPosition=Number.MAX_VALUE;
@@ -16981,7 +16982,7 @@ function makeOrtho(left, right, bottom, top, znear, zfar) {
                 }
             }
 
-            // no se ha podido encontrar un area en la textura para un trozo de tama–o width*height
+            // no se ha podido encontrar un area en la textura para un trozo de tamaæ’² width*height
             return null;
         },
         substract : function( x,y, width, height ) {
@@ -17204,8 +17205,8 @@ function makeOrtho(left, right, bottom, top, znear, zfar) {
             var mod;
 
             // dejamos un poco de espacio para que las texturas no se pisen.
-            // coordenadas normalizadas 0..1 dan problemas cuando las texturas no est‡n
-            // alineadas a posici—n mod 4,8...
+            // coordenadas normalizadas 0..1 dan problemas cuando las texturas no estõ€’–
+            // alineadas a posiciæº¶ mod 4,8...
             if ( w && this.padding ) {
                 mod= this.padding;
                 if ( w+mod<=this.width ) {
@@ -17235,7 +17236,7 @@ function makeOrtho(left, right, bottom, top, znear, zfar) {
 
                 this.scan.substract(where.x,where.y,w,h);
             } else {
-                CAAT.log('Imagen ',img.src,' de tama–o ',img.width,img.height,' no cabe.');
+                CAAT.log('Imagen ',img.src,' de tamaæ’² ',img.width,img.height,' no cabe.');
             }
         },
         changeHeuristic : function(criteria) {
