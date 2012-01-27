@@ -557,10 +557,13 @@ explicitly specified using a wait-spec)."
 
 
 (defn gen-animated-actor
-  [director & {:keys [image animation-indices frame-time draggable?]
-               :or {image nil animation-indices [0] frame-time 150 draggable? false}}]
+  [director & {:keys [image animation-indices frame-time draggable? thumbnail]
+               :or {image nil animation-indices [0] frame-time 150 draggable? false thumbnail nil}}]
   (log/info logger (str "Creating actor"))
-  (let [image (->image image director) 
+  (let [image (->image image director)
+        image (if (vector? thumbnail)
+                (CAAT.modules.ImageUtil/createThumb image (first thumbnail) (second thumbnail) true)
+                image)
         img (doto (CAAT/SpriteImage.)
               (.initialize image 1 (+ 1 (apply max animation-indices))) 
               (.setAnimationImageIndex (clj->js [0]))
@@ -699,7 +702,6 @@ explicitly specified using a wait-spec)."
           (.setOutlineColor "black")
           (.calcTextSize director)
           (.centerAt (/ (.width director) 2) (/ (.height director) 2)))
-        ;; img-utils (CAAT.modules.ImageUtil/createThumb )
         song (.getAudio (. director (getAudioManager)) "song")
         song-supported? (and song (not (not (and song.canPlayType (.replace (.canPlayType song "audio/mpeg;") #"no" "")))))
         song-playing? (atom false)
@@ -780,7 +782,7 @@ explicitly specified using a wait-spec)."
        ))
     container))
  
-(defn initialize-views
+(defn ^:export initialize-views
   "Accepts the form and greeting view HTML and adds them to the
   page. Animates the form sliding in from above. This function must be
   run before any other view functions. It may be called from any state
@@ -803,7 +805,11 @@ explicitly specified using a wait-spec)."
                {:id "teddy" :url "images/teddy_wave_animation_scaled.png"}
                {:id "book" :url "images/book.png"}
                {:id "play" :url "images/1194999000504424746player_play.svg.thumb.png"}
-               {:id "stop" :url "images/1194999023691726266player_stop.svg.thumb.png"}])
+               {:id "stop" :url "images/1194999023691726266player_stop.svg.thumb.png"}
+               {:id "blocks" :url "images/1194989520603923742unit_blocks_lion_kimbro_01.svg.thumb.png"}
+               {:id "car" :url "images/1245691880329073007ronaldrhouston_sport_car.svg.thumb.png"}
+               {:id "football" :url "images/football-th.png"}
+               ])
      (fn [director]
        (log/info logger " Images loaded. Creating scene.")
        (doto director
@@ -817,18 +823,21 @@ explicitly specified using a wait-spec)."
        (let [scene (. director (createScene))
              background (doto (CAAT/Actor.) 
                           (.setBackgroundImage (.getImage director "room")))
-             object-count 7
-             counter (gen-count-actor object-count :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
              basket (gen-basket director :x 440 :y 240)
+             actors [(gen-animated-actor director :image "book" :animation-indices [2 0 1 0] :draggable? true)
+                     (gen-animated-actor director :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                     (gen-animated-actor director :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                     (gen-animated-actor director :image "blocks" :animation-indices [0] :draggable? true)
+                     (gen-animated-actor director :image "teddy" :animation-indices [0 1 0 2] :draggable? true)]
+             counter (gen-count-actor (count actors) :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
              objects (map (fn [index object]
                             ;; make sure to pass mouse events to the basket
                             (doto object
-                              (.setLocation (+ (rand-int 30) (* 80 index) 100) (+ (rand-int 60) 370)) 
+                              (.setLocation (+ (rand-int 30) (* (/ 600 (count actors)) index) 100)
+                                            (+ (rand-int 50) 360)) 
                               (make-draggable-into-basket director scene basket counter)))
-                          (range object-count)
-                          (concat
-                           (take 2 (repeatedly (partial gen-animated-actor director :image "book" :animation-indices [2 0 1 0] :draggable? true)))
-                           (take 5 (repeatedly (partial gen-animated-actor director :image "teddy" :animation-indices [0 1 0 2] :draggable? true)))))] 
+                          (range)
+                          actors)] 
          (log/info logger " Displaying scene")
          (add! scene background)
          (add! scene basket)
@@ -836,5 +845,5 @@ explicitly specified using a wait-spec)."
          
          (doseq [object objects]
            (add! scene object))
-         (add! scene (gen-winning-screen scene))
+         ;; (add! scene (gen-winning-screen scene))
          )))))
