@@ -18,11 +18,20 @@
 
 (defmacro wrap
   [target-sym arglist & body]
-  `(let [oldf# ~target-sym]
+  `(let [wrapped# ~target-sym]
      (set!
       ~target-sym
+      ;; unbound wrapper function
+      ;; will not have an instance as its first argument
       (fn [& args#]
-        (let [~arglist (concat args# [(fn [inst# & args2#] (.apply oldf# inst# (~'clj->js args2#)))])]
+        (let [~arglist (concat
+                        ;; given arguments to wrapper
+                        args#
+                        ;; wrapped function
+                        [(fn [inst# & args2#]
+                           (.apply
+                            wrapped#
+                            inst# (~'clj->js args2#)))])]
           ~@body))
       ))
   )

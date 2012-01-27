@@ -106,9 +106,12 @@ CAAT.Point = function() {};
 
 CAAT.Image = function() {};
 CAAT.Image.prototype.initialize = function() {};
+
 CAAT.SpriteImage = function() {};
 CAAT.SpriteImage.prototype.setAnimationImageIndex = function() {};
 CAAT.SpriteImage.prototype.setChangeFPS = function() {};
+CAAT.SpriteImage.prototype.setSpriteIndex = function() {};
+CAAT.SpriteImage.prototype.spriteIndex = function() {};
 
 CAAT.AlphaBehavior = function() {};
 

@@ -281,11 +281,8 @@ explicitly specified using a wait-spec)."
                               (.setValues scale-factor 1 scale-factor 1)))
               (set! this.isOpened false))))
     ;; make sure the sprite changes when the mouse hovers over the basket
-    (set! basket-body.mouseEnter (fn [mouseEvent]
-                                   ;; (. basket-container (doMunch))
-                                   (. basket-container (doOpen))
-                                   ))
-    (set! basket-body.mouseExit (fn [mouseEvent] (. basket-container (doClose))))
+    (listen basket-body :mouse-enter (fn [mouseEvent] (. basket-container (doOpen))))
+    (listen basket-body :mouse-exit (fn [mouseEvent] (. basket-container (doClose))))
     basket-container)) 
 
 (defn throw-into-basket
@@ -480,51 +477,81 @@ explicitly specified using a wait-spec)."
     (. actor (inc))
     actor))
 
-(defn make-draggable-into-basket
-  "Given a target, make it draggable in such a way that it can be
-  dragged ontop of the basket."
-  [target director scene basket counter]
-  (set! target.__mouseDrag target.mouseDrag)
-  (set! target.mouseDrag
-        (fn [event]
-          (let [point-in-basket (.modelToModel target (.point event) basket)]
-            (if (.contains basket (.x point-in-basket) (.y point-in-basket))
-              (when (and (not (.isOpened basket)) (not (.eating basket)))
-                (throw-into-basket director scene basket target counter))
-              ;; (. basket (doClose))
-              ))
-          (.__mouseDrag target event)))
-  (m/wrap target.mouseDown [e oldf]
-          (.audioPlay director "flopp")
-          (pulsate! target :strength [1.1 1.4]))
-  (m/wrap target.mouseUp [e oldf]
-          (.audioPlay director "doppp"))
-  (.setDiscardable target true)
-  (let [oldf target.mouseEnter]
-    (set! target.mouseEnter
-          (fn [e] 
-            (.addBehavior
-             target
-             (doto (CAAT/ScaleBehavior.)
-               (.setFrameTime (.time scene) 250)
-               (.setValues 1 1.1 1 1.1))) 
-            (oldf target e)))) 
-  (let [oldf target.mouseExit]
-    (set! target.mouseExit
-          (fn [e]
-            (when (not target.trashed)
+
+(defn make-draggable!
+  "Given a TARGET, make it draggable. This will also add a pulsate
+  effect on the target as the mouse hovers over it."
+  [target scene]
+  (let [director (director-of scene)]
+    (m/wrap target.mouseDown [e oldf]
+            (.audioPlay director "flopp")
+            (pulsate! target :strength [1.1 1.4]))
+    (m/wrap target.mouseUp [e oldf]
+            (.audioPlay director "doppp"))
+    (.setDiscardable target true)
+    (listen target
+            :mouse-enter
+            (fn [e oldf] 
               (.addBehavior
                target
                (doto (CAAT/ScaleBehavior.)
                  (.setFrameTime (.time scene) 250)
-                 (.setValues 1.1 1 1.1 1))))
-            (oldf target e))))
-  target)
+                 (.setValues 1 1.1 1 1.1))) 
+              (oldf target e)))
+    (listen target :mouse-exit
+            (fn [e oldf]
+              (when (not target.trashed)
+                (.addBehavior
+                 target
+                 (doto (CAAT/ScaleBehavior.)
+                   (.setFrameTime (.time scene) 250)
+                   (.setValues 1.1 1 1.1 1))))
+              (oldf target e)))))
 
-(defn ->image [value director]
+(defn make-draggable-into
+  "Given a source, make it draggable in such a way that it can be
+  dragged ontop of the destination. Return the source."
+  [source destination scene action-fn & {:keys [valid-fn] :or {valid-fn (constantly true)}}]
+  (let [shot? (atom false)]
+   (listen source
+           :mouse-drag
+           (fn [event oldf]
+             (when (not @shot?)
+               (let [point-in-destination (.modelToModel source (.point event) destination)]
+                 (when (and (.contains destination (.x point-in-destination) (.y point-in-destination)) (valid-fn))
+                   (action-fn)
+                   (reset! shot? true))))
+             (oldf source event))))
+  (make-draggable! source scene)
+  source)
+
+(defn image?
+  "Returns true iff the argument is an HTMLImageElement,
+  HTMLCanvasElement or a CAAT.SpriteImage."
+  [img]
+  (cond (= (.nodeName img) "IMG") true
+        (= (.nodeName img) "CANVAS") true
+        (instance? CAAT.SpriteImage img) true))
+
+(defn ->sprite [img director & {:keys [rows cols] :or {rows 1 cols 1}}]
+  ;; (log/info logger "->sprite")
+  (assert (director? director) "Second arg must be a director instance.")
+  (cond (string? img) (->image img director)
+        (= (.nodeName img) "IMG") (.initialize (CAAT/SpriteImage.) img rows cols)
+        (= (.nodeName img) "CANVAS")  (.initialize (CAAT/SpriteImage.) img rows cols)
+        (instance? CAAT.SpriteImage img) img))
+
+(defn ->image [value director & {:keys [thumbnail] :or {thumbnail nil}}]
   ;; (log/info logger (str "->image " value))
-  (cond (string? value) (.getImage director value)
-        (instance? CAAT.Image value) value))
+  (assert (director? director) "first arg must be a director.")
+  (cond (string? value)
+        (let [image (.getImage director value)
+              _ (assert (not (nil? image)) "Could not find image.")
+              image (if (vector? thumbnail)
+                      (CAAT.modules.ImageUtil/createThumb image (first thumbnail) (second thumbnail) true)
+                      image)]
+          image)
+        (image? value) value))
 
 
 (defn draw-star [context & {:keys [radius color] :or {radius 80 color "green"}}]
@@ -554,33 +581,87 @@ explicitly specified using a wait-spec)."
     ;; (.enableDrag actor true)
     actor))
 
+(defn actor? [s]
+  (instance? CAAT.Actor s))
 
+(defn scene? [s]
+  (instance? CAAT.Scene s))
+
+(defn director? [d]
+  (instance? CAAT.Director d))
+
+(defn listen
+  "Listen on events for a CAAT.Actor. Possible events are:
+   - :mouse-enter
+   - :mouse-exit
+   - :mouse-drag
+
+   The handler function will be passed one additional parameter, which
+   is the old handler that was active. The old handler must be called
+   with the instance as its first argument, besides any other
+   arguments."
+  ([target event-name handler]
+     (assert (actor? target))
+     (assert (keyword? event-name))
+     (assert (fn? handler))
+     (cond (= event-name :mouse-enter)
+           (m/wrap target.mouseEnter [e oldf]
+                   (handler e oldf))
+           (= event-name :mouse-exit)
+           (m/wrap target.mouseExit [e oldf]
+                   (handler e oldf))
+           (= event-name :mouse-drag)
+           (m/wrap target.mouseDrag [e oldf]
+                   (handler e oldf))))
+  ([target e1 h1 e2 h2 & more]
+     (listen target e1 h1)
+     (listen target e2 h2)
+     (when more
+       (apply listen target more))))
+
+(defn gen-actor [scene & {:keys [image draggable? fill-style position size sprite-index]
+                          :or {draggable? false}}]
+  (assert (scene? scene) "First arg must be a scene.")
+  (when (and image fill-style)
+   (log/info logger (str "WARNING: both :image & :fill-style set. No image will be visible.")))
+  (when (and fill-style (not size) (not image))
+   (log/info logger (str "WARNING: :fill-style set, but no size specified. Nothing will be visible.")))
+  (let [actor (if fill-style (CAAT/ShapeActor.) (CAAT/Actor.))]
+    (when image
+      ;; (log/info logger (pr-str "Image" "; tagName=" (.tagName image) "; nodeName=" (.nodeName image) "; image=" image "; ->image" (->image image (director-of scene))))
+      (.setBackgroundImage actor (->image image (director-of scene))))
+    (when size
+      (.setSize actor (x-of size) (y-of size)))
+    (when fill-style
+      (.setFillStyle actor fill-style))
+    (when position
+      (.setLocation (x-of position) (y-of position)))
+    (when (not (false? draggable?))
+      (.enableDrag actor true))
+    (when sprite-index
+      (.setSpriteIndex actor sprite-index))
+    actor))
 
 (defn gen-animated-actor
-  [director & {:keys [image animation-indices frame-time draggable? thumbnail]
-               :or {image nil animation-indices [0] frame-time 150 draggable? false thumbnail nil}}]
+  [scene & {:keys [image animation-indices default-index key-frames frame-time draggable? thumbnail]
+               :or {image nil animation-indices [0] default-index 0 key-frames nil frame-time 150 draggable? false thumbnail nil}}]
+  (assert (scene? scene) "First arg must be a scene instance.")
   (log/info logger (str "Creating actor"))
-  (let [image (->image image director)
-        image (if (vector? thumbnail)
-                (CAAT.modules.ImageUtil/createThumb image (first thumbnail) (second thumbnail) true)
-                image)
+  (let [image (->image image (director-of scene) :thumbnail thumbnail) 
         img (doto (CAAT/SpriteImage.)
-              (.initialize image 1 (+ 1 (apply max animation-indices))) 
-              (.setAnimationImageIndex (clj->js [0]))
+              (.initialize image 1 (or key-frames (+ 1 (apply max animation-indices)))) 
+              (.setAnimationImageIndex (clj->js [default-index]))
               (.setChangeFPS frame-time)) 
-        actor (doto (CAAT/Actor.)
-                (.setBackgroundImage img)
-                (.enableDrag true))]
-    (let [oldf actor.mouseEnter]
-      (set! actor.mouseEnter
-            (fn [e] 
+        actor (gen-actor scene :image img :draggable? true)]
+    (listen actor
+            :mouse-enter
+            (fn [e oldf] 
               (.setAnimationImageIndex img (clj->js animation-indices))
-              (oldf actor e))))
-    (let [oldf actor.mouseExit]
-      (set! actor.mouseExit
-            (fn [e]
-              (.setAnimationImageIndex img (clj->js [0]))
-              (oldf actor e))))
+              (oldf actor e))
+            :mouse-exit
+            (fn [e oldf]
+              (.setAnimationImageIndex img (clj->js [default-index]))
+              (oldf actor e)))
     actor))
 
 
@@ -705,8 +786,8 @@ explicitly specified using a wait-spec)."
         song (.getAudio (. director (getAudioManager)) "song")
         song-supported? (and song (not (not (and song.canPlayType (.replace (.canPlayType song "audio/mpeg;") #"no" "")))))
         song-playing? (atom false)
-        play-icon (let [img (CAAT.modules.ImageUtil/createThumb (.getImage director "play") 35 35 true)
-                        img2 (CAAT.modules.ImageUtil/createThumb (.getImage director "stop") 35 35 true)
+        play-icon (let [img (->image "play" director :thumbnail [35 35])
+                        img2 (->image "stop" director :thumbnail [35 35])
                         actor (doto (CAAT/Actor.)
                                 (.setBackgroundImage img))
                         audio-loop (atom nil)] 
@@ -781,6 +862,21 @@ explicitly specified using a wait-spec)."
                            (reset! volume (max 0.2 (- @volume 0.2))))))) (fn [t]))
        ))
     container))
+
+(defn gen-bookshelf [scene]
+  (let [container (doto (CAAT/ActorContainer.)
+                    (.setBounds 110 135 180 60)
+                    ;; (.setFillStyle "green") ;; set this to see the area where a book can be placed
+                    )
+        img (-> "books"
+              (->image (director-of scene) :thumbnail [60 60])
+              (->sprite (director-of scene) :cols 3)) 
+        books (gen-actor scene :image img :sprite-index 0)]
+    (listen container
+            :mouse-enter
+            (fn [e] (.setSpriteIndex books (mod (+ (.spriteIndex img) 1) 3))))
+    (doto container
+      (add! books :position [10 13]))))
  
 (defn ^:export initialize-views
   "Accepts the form and greeting view HTML and adds them to the
@@ -804,6 +900,7 @@ explicitly specified using a wait-spec)."
                {:id "basket-head" :url "images/basket - head.png"}
                {:id "teddy" :url "images/teddy_wave_animation_scaled.png"}
                {:id "book" :url "images/book.png"}
+               {:id "books" :url "images/books.png"}
                {:id "play" :url "images/1194999000504424746player_play.svg.thumb.png"}
                {:id "stop" :url "images/1194999023691726266player_stop.svg.thumb.png"}
                {:id "blocks" :url "images/1194989520603923742unit_blocks_lion_kimbro_01.svg.thumb.png"}
@@ -824,26 +921,36 @@ explicitly specified using a wait-spec)."
              background (doto (CAAT/Actor.) 
                           (.setBackgroundImage (.getImage director "room")))
              basket (gen-basket director :x 440 :y 240)
-             actors [(gen-animated-actor director :image "book" :animation-indices [2 0 1 0] :draggable? true)
-                     (gen-animated-actor director :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                     (gen-animated-actor director :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                     (gen-animated-actor director :image "blocks" :animation-indices [0] :draggable? true)
-                     (gen-animated-actor director :image "teddy" :animation-indices [0 1 0 2] :draggable? true)]
-             counter (gen-count-actor (count actors) :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
-             objects (map (fn [index object]
-                            ;; make sure to pass mouse events to the basket
-                            (doto object
-                              (.setLocation (+ (rand-int 30) (* (/ 600 (count actors)) index) 100)
-                                            (+ (rand-int 50) 360)) 
-                              (make-draggable-into-basket director scene basket counter)))
-                          (range)
-                          actors)] 
+             bookshelf (gen-bookshelf scene)
+             counter (gen-count-actor 6 :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
+             basket-objects (map
+                             #(make-draggable-into % basket scene 
+                                                   (fn [] (throw-into-basket director scene basket % counter))
+                               :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket)))))
+                             [(gen-animated-actor scene :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                              (gen-animated-actor scene :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                              (gen-animated-actor scene :image "blocks" :animation-indices [0] :draggable? true)
+                              (gen-animated-actor scene :image "teddy" :animation-indices [0 1 0 2] :draggable? true)])
+             bookshelf-objects (map
+                                #(make-draggable-into % bookshelf scene 
+                                  (fn []
+                                    (.setExpired % true)
+                                    (. counter (inc))))
+                                [(gen-animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
+                                 (gen-animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])
+             objects (concat basket-objects bookshelf-objects)] 
          (log/info logger " Displaying scene")
          (add! scene background)
          (add! scene basket)
          (add! scene counter) 
+         (add! scene bookshelf)
          
-         (doseq [object objects]
-           (add! scene object))
+         (dotimes [index (count objects)]
+           (let [object (nth objects index)]
+             (add!
+              scene
+              object
+              :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
+                         (+ (rand-int 50) 360)])))
          ;; (add! scene (gen-winning-screen scene))
          )))))
