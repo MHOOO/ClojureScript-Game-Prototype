@@ -1,0 +1,1 @@
+rm prototype.rar && rar -m5 a prototype.rar out/public
