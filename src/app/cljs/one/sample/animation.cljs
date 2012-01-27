@@ -872,9 +872,9 @@ explicitly specified using a wait-spec)."
               (->image (director-of scene) :thumbnail [60 60])
               (->sprite (director-of scene) :cols 3)) 
         books (gen-actor scene :image img :sprite-index 0)]
-    (listen container
-            :mouse-enter
-            (fn [e] (.setSpriteIndex books (mod (+ (.spriteIndex img) 1) 3))))
+    (set! container.inc-book-count
+          (fn []
+            (.setSpriteIndex books (mod (+ (.spriteIndex img) 1) 3))))
     (doto container
       (add! books :position [10 13]))))
  
@@ -935,6 +935,7 @@ explicitly specified using a wait-spec)."
                                 #(make-draggable-into % bookshelf scene 
                                   (fn []
                                     (.setExpired % true)
+                                    (. bookshelf (inc-book-count))
                                     (. counter (inc))))
                                 [(gen-animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
                                  (gen-animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])

@@ -1,0 +1,11 @@
+* All sounds
+  - Sampling+ License
+    - mouse-click: http://www.freesound.org/people/THE_bizniss/sounds/39562/
+    - munching: http://www.freesound.org/people/IneQuation/sounds/27877/
+  - Attribution License (http://creativecommons.org/licenses/by/3.0/)
+    - jingle-glock: http://www.freesound.org/people/cfork/sounds/26875/
+    - flopp: http://www.freesound.org/people/cfork/sounds/8006/
+    - doppp: http://www.freesound.org/people/cfork/sounds/8001/
+    - splat: http://www.freesound.org/people/FreqMan/sounds/42960/
+  - Non-Commercial + Attribution    
+    - The Sound of Magic 3: http://www.newgrounds.com/audio/listen/448614
