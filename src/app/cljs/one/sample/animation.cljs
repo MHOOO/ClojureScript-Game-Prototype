@@ -108,11 +108,18 @@
                   ))))
 
 (defn scale-behavior [& {:keys [from to time]
-                             :or {from 0 to 0 time 120}}]
+                         :or {from 0 to 0 time 120}}]
   (let [[start-time time] (if (vector? time) time [0 time])]
     (doto (CAAT/ScaleBehavior.)
       (.setFrameTime start-time time) 
       (.setValues from to from to))))
+
+(defn alpha-behavior [& {:keys [from to time]
+                         :or {from 0 to 0 time 120}}]
+  (let [[start-time time] (if (vector? time) time [0 time])]
+    (doto (CAAT/AlphaBehavior.)
+      (.setFrameTime start-time time) 
+      (.setValues from to))))
 
 (defn parallel-behavior [& args]
   (let [container (doto (CAAT/ContainerBehavior.)
@@ -126,6 +133,7 @@
 (def kw->behavior-fn {:move (fn [arg] (apply move-behavior arg))
                       :rotate (fn [arg] (apply rotate-behavior arg))
                       :scale (fn [arg] (apply scale-behavior arg))
+                      :alpha (fn [arg] (apply alpha-behavior arg))
                       :parallel parallel-behavior})
 
 (defprotocol AAnimationSpec
@@ -495,21 +503,13 @@ explicitly specified using a wait-spec)."
     (.setDiscardable target true)
     (listen target
             :mouse-enter
-            (fn [e oldf] 
-              (.addBehavior
-               target
-               (doto (CAAT/ScaleBehavior.)
-                 (.setFrameTime (.time scene) 250)
-                 (.setValues 1 1.1 1 1.1))) 
+            (fn [e oldf]
+              (animate target [:scale [:from 1 :to 1.1 :time 150]]) 
               (oldf target e)))
     (listen target :mouse-exit
             (fn [e oldf]
               (when (not target.trashed)
-                (.addBehavior
-                 target
-                 (doto (CAAT/ScaleBehavior.)
-                   (.setFrameTime (.time scene) 250)
-                   (.setValues 1.1 1 1.1 1))))
+                (animate target [:scale [:from 1.1 :to 1 :time 150]]))
               (oldf target e)))))
 
 (defn make-draggable-into
@@ -672,12 +672,10 @@ explicitly specified using a wait-spec)."
     actor))
 
 
-(defn fade! [target director & {:keys [start-time duration]
-                                :or {start-time nil duration 2000}}]
+(defn fade! [target & {:keys [start-time duration director]
+                       :or {start-time nil duration 2000}}]
   (doto target
-    (.addBehavior (doto (CAAT/AlphaBehavior.)
-                    (.setFrameTime (or start-time (.time director)) duration)
-                    (.setValues 1 0)))))
+    (.addBehavior (alpha-behavior :from 1 :to 0 :time [(or start-time (.time (->director director))) duration]))))
 
 (let [auto-expire-listener
       (clj->js
@@ -721,38 +719,35 @@ explicitly specified using a wait-spec)."
      (.time scene)
      start-time
      (fn [scene-time timer-time timetask]
-       (on-create scene-time)
-       (dotimes [x batch-count]
-         (let [rotation-direction (if (< (Math/random) 0.5) -1 1)
-               star (doto (star :radius (rand-nth (map (comp dec dec dec) [12 14 16 18 20]))
-                                    :color (rand-nth ["yellow" "chartreuse" "orange" "red" "powderblue" "magenta" "cyan"])) 
-                      (.enableEvents false)
-                      (.setLocation (+ (x-of start-position) (* x 10)) (+ (y-of start-position) (rand-int 30)))
-                      ;; (. (cacheAsBitmap))
-                      (.addBehavior
-                       (rotate-behavior :from 0 :to (* rotation-direction (+ 180 (* (* (rand-int 2) -1) (rand-int 180))))
-                                            :time [scene-time 3000]))
-                      ;; TODO: why is the following not working? (rotation stops after some seconds)
-                      ;; (animate [:rotate [:from 0 :to (+ 180 (* (* (rand-int 2) -1) (rand-int 180)))
-                      ;;                    :time [scene-time 3000]]])
-                      (fall! director :duration (+ 2000 (rand-int 1000)))
-                      (.addBehavior (doto (CAAT/AlphaBehavior.)
-                                      (.setFrameTime scene-time 500)
-                                      (.setValues 0 1))
-                                    )
-                      (fade! director
-                             :duration (+ 3000 (rand-int 1000))
-                             :start-time (+ scene-time 500)))]
-           (add! target star)
-           ;; randomize the star z
-           (.setZOrder target star (- (rand-int batch-count) (/ batch-count 2))) 
-           ))
-       (repeatedly-create-stars target scene
-              :start-time repeat-interval
-              :start-position start-position
-              :batch-count batch-count
-              :repeat-interval repeat-interval
-              :on-create on-create)
+       (binding [*director* director]
+         (on-create scene-time)
+         (dotimes [x batch-count]
+           (let [rotation-direction (if (< (Math/random) 0.5) -1 1)
+                 star (doto (star :radius (rand-nth (map (comp dec dec dec) [12 14 16 18 20]))
+                                  :color (rand-nth ["yellow" "chartreuse" "orange" "red" "powderblue" "magenta" "cyan"])) 
+                        (.enableEvents false)
+                        (.setLocation (+ (x-of start-position) (* x 10)) (+ (y-of start-position) (rand-int 30)))
+                        ;; (. (cacheAsBitmap))
+                        (.addBehavior
+                         (rotate-behavior :from 0 :to (* rotation-direction (+ 180 (* (* (rand-int 2) -1) (rand-int 180))))
+                                          :time [scene-time 3000]))
+                        ;; TODO: why is the following not working? (rotation stops after some seconds)
+                        ;; (animate [:rotate [:from 0 :to (+ 180 (* (* (rand-int 2) -1) (rand-int 180)))
+                        ;;                    :time [scene-time 3000]]])
+                        (fall! director :duration (+ 2000 (rand-int 1000)))
+                        (.addBehavior (alpha-behavior :from 0 :to 1 :time [scene-time 500]))
+                        (fade! :duration (+ 3000 (rand-int 1000))
+                               :start-time (+ scene-time 500)))]
+             (add! target star)
+             ;; randomize the star z
+             (.setZOrder target star (- (rand-int batch-count) (/ batch-count 2))) 
+             ))
+         (repeatedly-create-stars target scene
+                                  :start-time repeat-interval
+                                  :start-position start-position
+                                  :batch-count batch-count
+                                  :repeat-interval repeat-interval
+                                  :on-create on-create))
        )
      (fn []) (fn []))))
 
@@ -966,5 +961,5 @@ explicitly specified using a wait-spec)."
                object
                :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
                           (+ (rand-int 50) 360)])))
-          ;; (add! scene (winning-screen scene))
+          (add! scene (winning-screen scene))
           ))))))
