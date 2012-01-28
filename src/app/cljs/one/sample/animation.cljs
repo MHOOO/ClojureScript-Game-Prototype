@@ -54,6 +54,27 @@
      [:rotate [:from 0 :to rotation-strength :time rotation-time]]
      [:rotate [:from rotation-strength :to 0 :time rotation-time]])))
 
+(def pathspec-kw->applyable-fn
+     {:linear (fn [path x y] (do (log/info logger (str "Adding path to " x "," y)) (.addLineTo path x y)))
+      :quadric (fn [path cpx cpy x y] (.addQuadricTo path cpx cpy x y))
+      :cubic (fn [path cpx1 cpy1 cpx2 cpy2 x y] (.addCubicTo path cpx1 cpy1 cpx2 cpy2 x y))
+      ;; TODO:
+      ;; :catmull (fn [path cpx1 cpy1 cpx2 cpy2 x y] (.addCubicTo path cpx1 cpy1 cpx2 cpy2 x y))
+      })
+
+(defn- apply-pathspec-to-path
+  ([path]
+     path)
+  ([path [kind & args]]
+     (if (number? kind)
+       (apply (pathspec-kw->applyable-fn :linear) path kind args)
+       (apply (pathspec-kw->applyable-fn kind) path args)))
+  ([path spec1 spec2 & more]
+     (doto path
+       (apply-pathspec-to-path spec1)
+       (apply-pathspec-to-path spec2))
+     (apply apply-pathspec-to-path path more)))
+
 (defn move-behavior
   "Generate & return a move behavior for the target. Still must be added by calling .addBehavior.
    Examples: 
@@ -73,25 +94,41 @@
   ;; (move-behavior target :from [0 0] :up 5) ;; initial absolute position & relative movement upwards
   ;; (move-behavior target :to [[10 10] [10 20]]) ;; multiple absolute positions
   ;; (move-behavior target :to [[:quadric 10 10 5 5]] ;; support for non-linear paths
-  [& {:keys [from to time auto-rotate?]
+  [& {:keys [from to time dur auto-rotate? target up down left right]
+      ;; TODO: remove :time
       :or {time 120 auto-rotate? false}}]
+  (assert (or (vector? to) (nil? to)) ":to must be a vector or nil.")
   (let [nr (fn [n] (or n 0))
-        [to-x to-y] (if (vector? to) to)
-        [from-x from-y] (if (vector? from) from)
-        [start-time time] (if (vector? time) time [0 time])]
-    ;; (log/info logger
-    ;;           (str (+ (nr (:right from)) (- (nr (:left from)))) " " (+ (nr (:down from)) (- (nr (:up from)))) " -> "
-    ;;                (+ (nr (:right to)) (- (nr (:left to)))) " " (+ (nr (:down to)) (- (nr (:up to))))))
-    ;; (log/info logger (str start-time " " time))
+        dur (or dur time) 
+        [from-x from-y] (if (vector? from)
+                          from
+                          [(or (and target (.x target)) 0)
+                           (or (and target (.y target)) 0)])
+        [start-time time] (if (vector? time)
+                            time
+                            [(or (and target (.time target)) 0) ;; maybe instead of 0, use (.time (->director nil)) ?
+                             time])
+        path (CAAT/Path.)] 
+    (cond
+     ;; :to [x y] or any of :up :down :left :right specified
+     (or (nil? to) (every? number? to))
+     (let [[to-x to-y] (if (vector? to) to)]
+       (.setLinear path from-x from-y
+                   (or to-x (+ from-x (nr right) (- (nr left))))
+                   (or to-y (+ from-y (nr down) (- (nr up))))))
+     ;; :to an array
+     :else (do (. path (beginPath from-x from-y))
+               (apply apply-pathspec-to-path path to)
+               (. path (endPath))))
     (doto (CAAT/PathBehavior.)
-      (.setFrameTime start-time time)
+      (.setFrameTime start-time dur)
       (.setAutoRotate (if auto-rotate? true false) (if (fn? auto-rotate?) auto-rotate? nil))
-      (.setPath
-       (doto (CAAT/Path.)
-         (.setLinear (or from-x (+ (nr (:right from)) (- (nr (:left from)))))
-                     (or from-y (+ (nr (:down from)) (- (nr (:up from)))))
-                     (or to-x (+ (nr (:right to)) (- (nr (:left to)))))
-                     (or to-y (+ (nr (:down to)) (- (nr (:up to)))))))))))
+      (.setValues path)
+      (.addListener
+       (clj->js
+        {:behaviorExpired
+         (fn [bh t a]
+           (log/info logger (str "Finished with (x,y):" (.x a) "," (.y a))))})))))
 
 (defn deg->rad [deg]
   (* (* 2 Math/PI) (/ deg 360)))
@@ -143,9 +180,10 @@
   CAAT.Behavior
   (behavior [s] s)
   cljs.core.Vector
-  (behavior [v]
-                (let [[kind & args] v] 
-                  (apply (kind kw->behavior-fn) args))))
+  (behavior
+   [v]
+   (let [[kind & args] v] 
+     (apply (kind kw->behavior-fn) args))))
 
 (defn animation-specs->behavior
   "Given a TARGET and any number of animation SPECS, create & return a
@@ -184,6 +222,65 @@ explicitly specified using a wait-spec)."
                       (+ t dur)
                       last-caat-behavior)))))
        container)))
+
+(def kw->behavior-fn2
+     {:move move-behavior
+      :rotate rotate-behavior
+      :scale scale-behavior
+      :alpha alpha-behavior})
+
+(defn- behavior-spec->behavior
+  "Given a behavior spec like [:move ...], transform that into an actual CAAT.Behavior."
+  [spec target]
+  (let [[kind & args] spec]
+    (apply (kw->behavior-fn2 kind) :target target args)))
+
+
+(defn create-animation
+  "Create an animation. This will return a function which can be
+applied to a target to animate it."
+  ([] (fn [target & {:keys [on-finish]}]
+        (when (fn? on-finish)
+         (on-finish target))))
+  ([spec]
+     (if (fn? spec)
+       (fn [target & {:keys [on-finish] :or {on-finish nil}}]
+         (spec target)
+         (when (fn? on-finish)
+           (on-finish target)))
+       (let [director *director*]
+         (fn [target & {:keys [on-finish] :or {on-finish nil}}]
+           (log/info logger (str "Running animation spec: " spec "; Current (x,y):" (.x target) "," (.y target)))
+           (let [bh (behavior-spec->behavior spec target)
+                 dur (. bh (getDuration))]
+             (when (fn? on-finish)
+               (.addListener
+                bh
+                (clj->js
+                 {:behaviorExpired
+                  (fn [bh time actor]
+                    (binding [*director* director]
+                      (on-finish actor)))})))
+             (.addBehavior target bh))))))
+  ([spec1 spec2 & more]
+     (fn [target & {:keys [on-finish]}]
+       ((create-animation spec1)
+        target
+        :on-finish
+        (fn [target]
+          ((create-animation spec2)
+           target
+           :on-finish
+           (fn [target] 
+             ((apply create-animation more)
+              target
+              :on-finish
+              on-finish))))))))
+
+(defn animate!
+  ([target & specs]
+     ((apply create-animation specs) target)))
+
 
 (defn animation
   [target & animations]
@@ -281,10 +378,11 @@ explicitly specified using a wait-spec)."
             (when (not this.isOpened)
               ;; (log/info logger "Opening basket")
               (animate basket-head (shaky-behavior basket-head))
-              (animate basket-head
-                       (move-behavior :to {:up 30})
-                       (fn [t] (on-finish)))
-              (animate basket-body [:scale [:from 1 :to scale-factor :time 120]]) 
+              (animate!
+               basket-head
+               [:move :up 30]
+               (fn [t] (on-finish)))
+              (animate! basket-body [:scale :from 1 :to scale-factor :time 120]) 
               (set! this.isOpened true))))
 
     (set! basket-container.doClose
@@ -294,9 +392,8 @@ explicitly specified using a wait-spec)."
               (doto basket-head
                 (. (emptyBehaviorList))
                 (.setRotation 0)
-                (animate [:move [:from {:up 30}]]
-                         (fn [t] (on-finish))))
-              (animate basket-body [:scale [:from scale-factor :to 1 :time 120]]) 
+                (animate! [:move :to [0 0]] (fn [t] (on-finish))))
+              (animate! basket-body [:scale :to 1 :time 120]) 
               (set! this.isOpened false))))
     ;; make sure the sprite changes when the mouse hovers over the basket
     (listen basket-body :mouse-enter (fn [mouseEvent] (. basket-container (doOpen))))
@@ -349,9 +446,9 @@ explicitly specified using a wait-spec)."
     (doto target
       (.enableDrag false)
       (.enableEvents false)
-      (animate [:move [:from [(.x source) (.y source)] :to [(.x destination) (.y destination)] :time 100]])
-      (animate [:scale [:from 1 :to 0.1 :time total-animation-time]])
-      (animate [:rotate [:from 0 :to 360 :time total-animation-time]]))))
+      (animate! [:move :from [(.x source) (.y source)] :to [(.x destination) (.y destination)] :dur 100])
+      (animate! [:scale :from 1 :to 0.1 :time total-animation-time])
+      (animate! [:rotate :from 0 :to 360 :time total-animation-time]))))
 
 (defn draw-bubble
   "Draw a speech bubble. With given width, height & corner radius."
@@ -910,56 +1007,65 @@ explicitly specified using a wait-spec)."
                ])
      (fn [director]
        (binding [*director* director]
-        (log/info logger " Images loaded. Creating scene.")
-        (doto director
-          (.addAudio "chime" "sounds/22267__zeuss__the-chime.ogg" ;; "sounds/22267__zeuss__the-chime.mp3"
-                     ) 
-          (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.ogg" ;; "sounds/8001__cfork__cf-fx-doppp-01.wav"
-                     )
-          (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.ogg" ;; "sounds/8006__cfork__cf-fx-flopp-03-dry.wav"
-                     )
-          (.addAudio "munching" "sounds/27877__inequation__munching.ogg" ;; "sounds/27877__inequation__munching.wav"
-                     )
-          (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
-        (let [scene (. director (createScene))
-              background (actor :image "room")
-              basket (basket scene :x 440 :y 240)
-              bookshelf (bookshelf scene)
-              counter (count-actor 6 :on-total-reached (fn [e] (add! scene (winning-screen scene))))
-              basket-objects (map
-                              #(let [actor (apply animated-actor (apply concat %))]
-                                 (make-draggable-into
-                                  actor
-                                  basket scene 
-                                  (fn [] (throw-into-basket director scene basket actor counter))
-                                  :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket))))))
-                              [{:image "football" :animation-indices [0] :draggable? true :thumbnail [60 60]}
-                               {:image "car" :animation-indices [0] :draggable? true :thumbnail [60 60]}
-                               {:image "blocks" :animation-indices [0] :draggable? true}
-                               {:image "teddy" :animation-indices [0 1 0 2] :draggable? true}])
-              bookshelf-objects (map
-                                 #(let [actor (apply animated-actor (apply concat %))]
-                                    (make-draggable-into
-                                     actor bookshelf scene 
-                                     (fn []
-                                       (.setExpired actor true)
-                                       (. bookshelf (inc-book-count))
-                                       (. counter (inc)))))
-                                 [{:image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true}
-                                  {:image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true}])
-              objects (concat basket-objects bookshelf-objects)] 
-          (log/info logger " Displaying scene")
-          (add! scene background)
-          (add! scene basket)
-          (add! scene counter) 
-          (add! scene bookshelf)
+         (log/info logger " Images loaded. Creating scene.")
+         (doto director
+           (.addAudio "chime" "sounds/22267__zeuss__the-chime.ogg" ;; "sounds/22267__zeuss__the-chime.mp3"
+                      ) 
+           (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.ogg" ;; "sounds/8001__cfork__cf-fx-doppp-01.wav"
+                      )
+           (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.ogg" ;; "sounds/8006__cfork__cf-fx-flopp-03-dry.wav"
+                      )
+           (.addAudio "munching" "sounds/27877__inequation__munching.ogg" ;; "sounds/27877__inequation__munching.wav"
+                      )
+           (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
+         (let [scene (. director (createScene))
+               background (actor :image "room")
+               basket (basket scene :x 440 :y 240)
+               bookshelf (bookshelf scene)
+               counter (count-actor 6 :on-total-reached (fn [e] (add! scene (winning-screen scene))))
+               basket-objects (map
+                               #(let [actor (apply animated-actor (apply concat %))]
+                                  (make-draggable-into
+                                   actor
+                                   basket scene 
+                                   (fn [] (throw-into-basket director scene basket actor counter))
+                                   :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket))))))
+                               [{:image "football" :animation-indices [0] :draggable? true :thumbnail [60 60]}
+                                {:image "car" :animation-indices [0] :draggable? true :thumbnail [60 60]}
+                                {:image "blocks" :animation-indices [0] :draggable? true}
+                                {:image "teddy" :animation-indices [0 1 0 2] :draggable? true}])
+               bookshelf-objects (map
+                                  #(let [actor (apply animated-actor (apply concat %))]
+                                     (make-draggable-into
+                                      actor bookshelf scene 
+                                      (fn []
+                                        (.setExpired actor true)
+                                        (. bookshelf (inc-book-count))
+                                        (. counter (inc)))))
+                                  [{:image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true}
+                                   {:image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true}])
+               objects (concat basket-objects bookshelf-objects)] 
+           (log/info logger " Displaying scene")
+           (add! scene background)
+           (add! scene basket)
+           (add! scene counter) 
+           (add! scene bookshelf)
+           ;; (let [actor (actor :fill-style "black" :size [50 50])]
+           ;;   (add! scene actor)
+           ;;   ;; BUG: (create-animation [:move :to [[400 300] [500 200]] :dur 6000])
+           ;;   ;; NO BUG: (create-animation [:move :to [[400 300] [500 250]] :dur 6000])  ;; what is the difference?
+           ;;   ((create-animation [:move :to [[400 300] [500 250]] :dur 2000]
+           ;;                      (fn [target] (log/info logger "first stage finished!"))
+           ;;                      [:move :up 100 :dur 3000]
+           ;;                      (fn [target] (log/info logger "second stage finished!")))
+           ;;    :on-finish (fn [actor] (log/info logger "Finished!"))))
          
-          (dotimes [index (count objects)]
-            (let [object (nth objects index)]
-              (add!
-               scene
-               object
-               :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
-                          (+ (rand-int 50) 360)])))
-          (add! scene (winning-screen scene))
-          ))))))
+           (dotimes [index (count objects)]
+             (let [object (nth objects index)]
+               (add!
+                scene
+                object
+                :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
+                           (+ (rand-int 50) 360)])))
+           ;; (add! scene (winning-screen scene))
+           ))))))
