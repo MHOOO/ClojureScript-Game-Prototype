@@ -80,6 +80,16 @@
 
    (gen-move-behavior :from [0 0] :to [50 50] :time 120)
    (gen-move-behavior :from [50 50] :to [0 0] :time [120 120])"
+  ;; TODO: Currently, :to & :from are relative to (0,0) with respect
+  ;; to the container that target is in. This is counterintuitive and
+  ;; should be relative to the targets current position. Also I
+  ;; propose the following API change:
+  ;;
+  ;; (gen-move-behavior target :to [10 10]) ;; movement to absolute position within parent container
+  ;; (gen-move-behavior target :up 5 :left 3) ;; relative (to current position) movement
+  ;; (gen-move-behavior target :from [0 0] :up 5) ;; initial absolute position & relative movement upwards
+  ;; (gen-move-behavior target :to [[10 10] [10 20]]) ;; multiple absolute positions
+  ;; (gen-move-behavior target :to [[:quadric 10 10 5 5]] ;; support for non-linear paths
   [& {:keys [from to time auto-rotate?]
       :or {time 120 auto-rotate? false}}]
   (let [nr (fn [n] (or n 0))
@@ -154,7 +164,9 @@ overriden, so that there are no waits between animations (unless
 explicitly specified using a wait-spec)."
   ([target & specs]
      (let [container (doto (CAAT/ContainerBehavior.)
-                       (.setFrameTime (.time target) Number.MAX_VALUE))]
+                       (.setFrameTime (.time target) Number.MAX_VALUE))
+           ;; store the current director, so it can be bound inside callbacks
+           director *director*]
        (loop [[spec & more] specs
               t 0
               last-caat-behavior nil]
@@ -169,7 +181,8 @@ explicitly specified using a wait-spec)."
                       (let [callback-fn spec]
                         (fn [bh t a]
                           ;; (log/info logger (pr-str "Calling expiration fn" spec))
-                          (callback-fn t)))})))
+                          (binding [*director* director]
+                           (callback-fn t))))})))
                  (recur more t last-caat-behavior))
              (let [bh (gen-behavior spec)
                    dur (. bh (getDuration))
@@ -181,13 +194,32 @@ explicitly specified using a wait-spec)."
                       last-caat-behavior)))))
        container)))
 
+(defn gen-animation
+  [target & animations]
+  {:pre [(actor? target)]}
+  (apply animation-specs->behavior target animations))
+
 (defn animate
   "Animate a target. Besides the target, takes any number of behavior specs.
    For supported specs, take a look at the KW->BEHAVIOR-FN map.
   Example:
     (animate target [:move [:to {:up md :left 5} :time 200]])"
+  ;; TODO: Currently it is not possible to issue behaviors which are
+  ;; relative to their previous behavior, without doing the necessary
+  ;; calculations beforehand. This is because all Behaviors are being
+  ;; created at the same time and there is no access to values which
+  ;; would have been changed during behavior execution. I propose the
+  ;; following change to fix that:
+  ;;
+  ;; 1. animate -> animate!
+  ;; 
+  ;; 2. instead of creating all behaviors directly, only create the
+  ;;    first behavior from the list of behavior specs. Then, upon
+  ;;    finishing of that behavior, create the next behavior in the
+  ;;    list and add it to the target.
+  ;; 3. Make sure to provide means to stop an animation.
   [target & animations]
-  (.addBehavior target (apply animation-specs->behavior target animations)))
+  (.addBehavior target (apply gen-animation target animations)))
 
 (defn basket-head-munch! [basket-head & {:keys [on-finish] :or {on-finish (fn [])}}]
   (let [md 10]
@@ -223,25 +255,27 @@ explicitly specified using a wait-spec)."
            [:rotate [:to -5 :time 80]]
            [:rotate [:from -5 :time 80]]))
 
+(defn ->director [v]
+  (cond (nil? v) (or *director* (throw "No director bound."))
+        (instance? CAAT.Director v) v))
+
+(def *director* nil)
+
 (defn gen-basket
   "Generate & return the interactive basket.
    The basket will have doOpen & doClose methods to open & close
   it. Also it will open & close when hovered."
-  [director & {:keys [x y] :or {x 490 y 320}}]
-  (let [scale-factor 1.02
-        basket-sprite (.initialize (CAAT/SpriteImage.) (.getImage director "basket") 1 2)
-        basket-head (.initialize (CAAT/SpriteImage.) (.getImage director "basket-head") 1 1)
+  [scene & {:keys [x y] :or {x 490 y 320}}]
+  (let [director (director-of scene)
+        scale-factor 1.02
+        basket-sprite (->sprite (->image "basket") :cols 2)
+        basket-head (->sprite (->image "basket-head"))
         basket-container (doto (CAAT/ActorContainer.) 
                            (.setBackgroundImage basket-sprite)
                            (.setLocation x y)
                            (.setFillStyle "#ff3fff"))
-        basket-body (doto (CAAT/Actor.)
-                      (.setBackgroundImage basket-sprite) 
-                      (.setSpriteIndex 1))
-        basket-head (doto (CAAT/Actor.)
-                      (.setBackgroundImage basket-head)
-                      (.setLocation 0 0)
-                      (.enableEvents false))]
+        basket-body (gen-actor scene :image basket-sprite :sprite-index 1)
+        basket-head (gen-actor scene :image basket-head :events? false)]
     (.addChild basket-container basket-body)
     (.addChild basket-container basket-head)
     (set! basket-container.isOpened false)
@@ -533,19 +567,17 @@ explicitly specified using a wait-spec)."
         (= (.nodeName img) "CANVAS") true
         (instance? CAAT.SpriteImage img) true))
 
-(defn ->sprite [img director & {:keys [rows cols] :or {rows 1 cols 1}}]
-  ;; (log/info logger "->sprite")
-  (assert (director? director) "Second arg must be a director instance.")
-  (cond (string? img) (->image img director)
+(defn ->sprite [img & {:keys [rows cols director] :or {rows 1 cols 1}}]
+  ;; (log/info logger "->sprite") 
+  (cond (string? img) (->image img :director director)
         (= (.nodeName img) "IMG") (.initialize (CAAT/SpriteImage.) img rows cols)
         (= (.nodeName img) "CANVAS")  (.initialize (CAAT/SpriteImage.) img rows cols)
         (instance? CAAT.SpriteImage img) img))
 
-(defn ->image [value director & {:keys [thumbnail] :or {thumbnail nil}}]
-  ;; (log/info logger (str "->image " value))
-  (assert (director? director) "first arg must be a director.")
+(defn ->image [value & {:keys [thumbnail director] :or {thumbnail nil}}]
+  ;; (log/info logger (str "->image " value)) 
   (cond (string? value)
-        (let [image (.getImage director value)
+        (let [image (.getImage (->director director) value)
               _ (assert (not (nil? image)) "Could not find image.")
               image (if (vector? thumbnail)
                       (CAAT.modules.ImageUtil/createThumb image (first thumbnail) (second thumbnail) true)
@@ -604,23 +636,29 @@ explicitly specified using a wait-spec)."
      (assert (actor? target))
      (assert (keyword? event-name))
      (assert (fn? handler))
-     (cond (= event-name :mouse-enter)
-           (m/wrap target.mouseEnter [e oldf]
-                   (handler e oldf))
-           (= event-name :mouse-exit)
-           (m/wrap target.mouseExit [e oldf]
-                   (handler e oldf))
-           (= event-name :mouse-drag)
-           (m/wrap target.mouseDrag [e oldf]
-                   (handler e oldf))))
+     (let [;; store director, so the handler fn has access to it
+           director *director*]
+       (cond (= event-name :mouse-enter)
+             (m/wrap target.mouseEnter [e oldf]
+                     (binding [*director* director]
+                       (handler e oldf)))
+             (= event-name :mouse-exit)
+             (m/wrap target.mouseExit [e oldf]
+                     (binding [*director* director]
+                       (handler e oldf)))
+             (= event-name :mouse-drag)
+             (m/wrap target.mouseDrag [e oldf]
+                     (binding [*director* director]
+                       (handler e oldf))))))
   ([target e1 h1 e2 h2 & more]
      (listen target e1 h1)
      (listen target e2 h2)
      (when more
        (apply listen target more))))
 
-(defn gen-actor [scene & {:keys [image draggable? fill-style position size sprite-index]
-                          :or {draggable? false}}]
+(defn gen-actor
+  [scene & {:keys [image draggable? fill-style position size sprite-index events?]
+            :or {draggable? false}}]
   (assert (scene? scene) "First arg must be a scene.")
   (when (and image fill-style)
    (log/info logger (str "WARNING: both :image & :fill-style set. No image will be visible.")))
@@ -629,7 +667,7 @@ explicitly specified using a wait-spec)."
   (let [actor (if fill-style (CAAT/ShapeActor.) (CAAT/Actor.))]
     (when image
       ;; (log/info logger (pr-str "Image" "; tagName=" (.tagName image) "; nodeName=" (.nodeName image) "; image=" image "; ->image" (->image image (director-of scene))))
-      (.setBackgroundImage actor (->image image (director-of scene))))
+      (.setBackgroundImage actor (->image image)))
     (when size
       (.setSize actor (x-of size) (y-of size)))
     (when fill-style
@@ -638,6 +676,8 @@ explicitly specified using a wait-spec)."
       (.setLocation (x-of position) (y-of position)))
     (when (not (false? draggable?))
       (.enableDrag actor true))
+    (when events?
+      (.enableEvents actor events?))
     (when sprite-index
       (.setSpriteIndex actor sprite-index))
     actor))
@@ -647,7 +687,7 @@ explicitly specified using a wait-spec)."
                :or {image nil animation-indices [0] default-index 0 key-frames nil frame-time 150 draggable? false thumbnail nil}}]
   (assert (scene? scene) "First arg must be a scene instance.")
   (log/info logger (str "Creating actor"))
-  (let [image (->image image (director-of scene) :thumbnail thumbnail) 
+  (let [image (->image image :thumbnail thumbnail) 
         img (doto (CAAT/SpriteImage.)
               (.initialize image 1 (or key-frames (+ 1 (apply max animation-indices)))) 
               (.setAnimationImageIndex (clj->js [default-index]))
@@ -786,8 +826,8 @@ explicitly specified using a wait-spec)."
         song (.getAudio (. director (getAudioManager)) "song")
         song-supported? (and song (not (not (and song.canPlayType (.replace (.canPlayType song "audio/mpeg;") #"no" "")))))
         song-playing? (atom false)
-        play-icon (let [img (->image "play" director :thumbnail [35 35])
-                        img2 (->image "stop" director :thumbnail [35 35])
+        play-icon (let [img (->image "play" :thumbnail [35 35])
+                        img2 (->image "stop" :thumbnail [35 35])
                         actor (doto (CAAT/Actor.)
                                 (.setBackgroundImage img))
                         audio-loop (atom nil)] 
@@ -869,8 +909,8 @@ explicitly specified using a wait-spec)."
                     ;; (.setFillStyle "green") ;; set this to see the area where a book can be placed
                     )
         img (-> "books"
-              (->image (director-of scene) :thumbnail [60 60])
-              (->sprite (director-of scene) :cols 3)) 
+              (->image :thumbnail [60 60])
+              (->sprite :cols 3)) 
         books (gen-actor scene :image img :sprite-index 0)]
     (set! container.inc-book-count
           (fn []
@@ -908,52 +948,53 @@ explicitly specified using a wait-spec)."
                {:id "football" :url "images/football-th.png"}
                ])
      (fn [director]
-       (log/info logger " Images loaded. Creating scene.")
-       (doto director
-         (.addAudio "chime" "sounds/22267__zeuss__the-chime.ogg" ;; "sounds/22267__zeuss__the-chime.mp3"
-                    ) 
-         (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.ogg" ;; "sounds/8001__cfork__cf-fx-doppp-01.wav"
-                    )
-         (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.ogg" ;; "sounds/8006__cfork__cf-fx-flopp-03-dry.wav"
-                    )
-         (.addAudio "munching" "sounds/27877__inequation__munching.ogg" ;; "sounds/27877__inequation__munching.wav"
-                    )
-         (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
-       (let [scene (. director (createScene))
-             background (doto (CAAT/Actor.) 
-                          (.setBackgroundImage (.getImage director "room")))
-             basket (gen-basket director :x 440 :y 240)
-             bookshelf (gen-bookshelf scene)
-             counter (gen-count-actor 6 :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
-             basket-objects (map
-                             #(make-draggable-into % basket scene 
-                                                   (fn [] (throw-into-basket director scene basket % counter))
-                               :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket)))))
-                             [(gen-animated-actor scene :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                              (gen-animated-actor scene :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                              (gen-animated-actor scene :image "blocks" :animation-indices [0] :draggable? true)
-                              (gen-animated-actor scene :image "teddy" :animation-indices [0 1 0 2] :draggable? true)])
-             bookshelf-objects (map
-                                #(make-draggable-into % bookshelf scene 
-                                  (fn []
-                                    (.setExpired % true)
-                                    (. bookshelf (inc-book-count))
-                                    (. counter (inc))))
-                                [(gen-animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
-                                 (gen-animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])
-             objects (concat basket-objects bookshelf-objects)] 
-         (log/info logger " Displaying scene")
-         (add! scene background)
-         (add! scene basket)
-         (add! scene counter) 
-         (add! scene bookshelf)
+       (binding [*director* director]
+        (log/info logger " Images loaded. Creating scene.")
+        (doto director
+          (.addAudio "chime" "sounds/22267__zeuss__the-chime.ogg" ;; "sounds/22267__zeuss__the-chime.mp3"
+                     ) 
+          (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.ogg" ;; "sounds/8001__cfork__cf-fx-doppp-01.wav"
+                     )
+          (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.ogg" ;; "sounds/8006__cfork__cf-fx-flopp-03-dry.wav"
+                     )
+          (.addAudio "munching" "sounds/27877__inequation__munching.ogg" ;; "sounds/27877__inequation__munching.wav"
+                     )
+          (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
+        (let [scene (. director (createScene))
+              background (doto (CAAT/Actor.) 
+                           (.setBackgroundImage (.getImage director "room")))
+              basket (gen-basket scene :x 440 :y 240)
+              bookshelf (gen-bookshelf scene)
+              counter (gen-count-actor 6 :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
+              basket-objects (map
+                              #(make-draggable-into % basket scene 
+                                                    (fn [] (throw-into-basket director scene basket % counter))
+                                                    :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket)))))
+                              [(gen-animated-actor scene :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                               (gen-animated-actor scene :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                               (gen-animated-actor scene :image "blocks" :animation-indices [0] :draggable? true)
+                               (gen-animated-actor scene :image "teddy" :animation-indices [0 1 0 2] :draggable? true)])
+              bookshelf-objects (map
+                                 #(make-draggable-into % bookshelf scene 
+                                                       (fn []
+                                                         (.setExpired % true)
+                                                         (. bookshelf (inc-book-count))
+                                                         (. counter (inc))))
+                                 [(gen-animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
+                                  (gen-animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])
+              objects (concat basket-objects bookshelf-objects)] 
+          (log/info logger " Displaying scene")
+          (add! scene background)
+          (add! scene basket)
+          (add! scene counter) 
+          (add! scene bookshelf)
          
-         (dotimes [index (count objects)]
-           (let [object (nth objects index)]
-             (add!
-              scene
-              object
-              :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
-                         (+ (rand-int 50) 360)])))
-         ;; (add! scene (gen-winning-screen scene))
-         )))))
+          (dotimes [index (count objects)]
+            (let [object (nth objects index)]
+              (add!
+               scene
+               object
+               :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
+                          (+ (rand-int 50) 360)])))
+          ;; (add! scene (gen-winning-screen scene))
+          ))))))
