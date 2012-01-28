@@ -416,7 +416,7 @@ explicitly specified using a wait-spec)."
 
     actor-container))
 
-(def *positive-feedbacks* ["Super!" "Genau!" "Ja, sehr richtig!" "Ja, weiter so!" "Mmm, lecker!" "Au ja!"])
+(def *positive-feedbacks* ["Super!" "Genau!" "Ja, sehr richtig!" "Ja, weiter so!" "Mmm, lecker!" "Gut gemacht!"])
 
 (defprotocol Container
   (add!* [c obj]))
