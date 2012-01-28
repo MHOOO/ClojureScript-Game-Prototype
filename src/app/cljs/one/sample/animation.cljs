@@ -662,9 +662,8 @@ explicitly specified using a wait-spec)."
     actor))
 
 (defn animated-actor
-  [scene & {:keys [image animation-indices default-index key-frames frame-time draggable? thumbnail]
-               :or {image nil animation-indices [0] default-index 0 key-frames nil frame-time 150 draggable? false thumbnail nil}}]
-  (assert (scene? scene) "First arg must be a scene instance.")
+  [& {:keys [image animation-indices default-index key-frames frame-time draggable? thumbnail]
+      :or {image nil animation-indices [0] default-index 0 key-frames nil frame-time 150 draggable? false thumbnail nil}}] 
   (log/info logger (str "Creating actor"))
   (let [image (->image image :thumbnail thumbnail) 
         img (doto (CAAT/SpriteImage.)
@@ -944,21 +943,26 @@ explicitly specified using a wait-spec)."
               bookshelf (bookshelf scene)
               counter (count-actor 6 :on-total-reached (fn [e] (add! scene (winning-screen scene))))
               basket-objects (map
-                              #(make-draggable-into % basket scene 
-                                                    (fn [] (throw-into-basket director scene basket % counter))
-                                                    :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket)))))
-                              [(animated-actor scene :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                               (animated-actor scene :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                               (animated-actor scene :image "blocks" :animation-indices [0] :draggable? true)
-                               (animated-actor scene :image "teddy" :animation-indices [0 1 0 2] :draggable? true)])
+                              #(let [actor (apply animated-actor (apply concat %))]
+                                 (make-draggable-into
+                                  actor
+                                  basket scene 
+                                  (fn [] (throw-into-basket director scene basket actor counter))
+                                  :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket))))))
+                              [{:image "football" :animation-indices [0] :draggable? true :thumbnail [60 60]}
+                               {:image "car" :animation-indices [0] :draggable? true :thumbnail [60 60]}
+                               {:image "blocks" :animation-indices [0] :draggable? true}
+                               {:image "teddy" :animation-indices [0 1 0 2] :draggable? true}])
               bookshelf-objects (map
-                                 #(make-draggable-into % bookshelf scene 
-                                                       (fn []
-                                                         (.setExpired % true)
-                                                         (. bookshelf (inc-book-count))
-                                                         (. counter (inc))))
-                                 [(animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
-                                  (animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])
+                                 #(let [actor (apply animated-actor (apply concat %))]
+                                    (make-draggable-into
+                                     actor bookshelf scene 
+                                     (fn []
+                                       (.setExpired actor true)
+                                       (. bookshelf (inc-book-count))
+                                       (. counter (inc)))))
+                                 [{:image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true}
+                                  {:image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true}])
               objects (concat basket-objects bookshelf-objects)] 
           (log/info logger " Displaying scene")
           (add! scene background)
