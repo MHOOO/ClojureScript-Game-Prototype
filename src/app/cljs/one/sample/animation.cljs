@@ -910,10 +910,14 @@ explicitly specified using a wait-spec)."
      (fn [director]
        (log/info logger " Images loaded. Creating scene.")
        (doto director
-         (.addAudio "chime" ["sounds/22267__zeuss__the-chime.ogg" "sounds/22267__zeuss__the-chime.mp3"]) 
-         (.addAudio "doppp" ["sounds/8001__cfork__cf-fx-doppp-01.ogg" "sounds/8001__cfork__cf-fx-doppp-01.wav"])
-         (.addAudio "flopp" ["sounds/8006__cfork__cf-fx-flopp-03-dry.ogg" "sounds/8006__cfork__cf-fx-flopp-03-dry.wav"])
-         (.addAudio "munching" ["sounds/27877__inequation__munching.ogg" "sounds/27877__inequation__munching.wav"])
+         (.addAudio "chime" "sounds/22267__zeuss__the-chime.ogg" ;; "sounds/22267__zeuss__the-chime.mp3"
+                    ) 
+         (.addAudio "doppp" "sounds/8001__cfork__cf-fx-doppp-01.ogg" ;; "sounds/8001__cfork__cf-fx-doppp-01.wav"
+                    )
+         (.addAudio "flopp" "sounds/8006__cfork__cf-fx-flopp-03-dry.ogg" ;; "sounds/8006__cfork__cf-fx-flopp-03-dry.wav"
+                    )
+         (.addAudio "munching" "sounds/27877__inequation__munching.ogg" ;; "sounds/27877__inequation__munching.wav"
+                    )
          (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
        (let [scene (. director (createScene))
              background (doto (CAAT/Actor.) 
