@@ -271,15 +271,12 @@ explicitly specified using a wait-spec)."
     (set! basket-container.doOpen
           (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
             (when (not this.isOpened)
-              (log/info logger "Opening basket")
+              ;; (log/info logger "Opening basket")
               (animate basket-head (shaky-behavior basket-head))
               (animate basket-head
                        (move-behavior :to {:up 30})
                        (fn [t] (on-finish)))
-              (.addBehavior basket-body
-                            (doto (CAAT/ScaleBehavior.)
-                              (.setFrameTime (.time basket-body) 120)
-                              (.setValues 1 scale-factor 1 scale-factor)))
+              (animate basket-body [:scale [:from 1 :to scale-factor :time 120]]) 
               (set! this.isOpened true))))
 
     (set! basket-container.doClose
@@ -291,11 +288,7 @@ explicitly specified using a wait-spec)."
                 (.setRotation 0)
                 (animate [:move [:from {:up 30}]]
                          (fn [t] (on-finish))))
-              
-              (.addBehavior basket-body
-                            (doto (CAAT/ScaleBehavior.)
-                              (.setFrameTime (.time basket-body) 120)
-                              (.setValues scale-factor 1 scale-factor 1)))
+              (animate basket-body [:scale [:from scale-factor :to 1 :time 120]]) 
               (set! this.isOpened false))))
     ;; make sure the sprite changes when the mouse hovers over the basket
     (listen basket-body :mouse-enter (fn [mouseEvent] (. basket-container (doOpen))))
@@ -348,13 +341,9 @@ explicitly specified using a wait-spec)."
     (doto target
       (.enableDrag false)
       (.enableEvents false)
-      (.addBehavior (move-behavior :from [(.x source) (.y source)] :to [(.x destination) (.y destination)]))
-      (.addBehavior (doto (CAAT/ScaleBehavior.)
-                      (.setFrameTime (.time target) total-animation-time)
-                      (.setValues 1 0.1 1 0.1)))
-      (.addBehavior (doto (CAAT/RotateBehavior.)
-                      (.setFrameTime (.time target) total-animation-time)
-                      (.setValues 0 (* 2 Math/PI))) 0 0))))
+      (animate [:move [:from [(.x source) (.y source)] :to [(.x destination) (.y destination)] :time 100]])
+      (animate [:scale [:from 1 :to 0.1 :time total-animation-time]])
+      (animate [:rotate [:from 0 :to 360 :time total-animation-time]]))))
 
 (defn draw-bubble
   "Draw a speech bubble. With given width, height & corner radius."
