@@ -41,38 +41,38 @@
   (y-of [t] (.y t)))
 
 
-(defn gen-shaky-behavior
+(defn shaky-behavior
   "Generate & return a rotation behavior that will rotate a target left & right repeatedly."
   [target]
   (let [total-time 1500.0
         rotation-time (/ total-time 4)
         rotation-strength (/ (* 2 Math/PI) 140)]
-    (gen-animation
+    (animation
      target
      [:rotate [:to (- rotation-strength) :time rotation-time]]
      [:rotate [:from (- rotation-strength) :to 0 :time rotation-time]]
      [:rotate [:from 0 :to rotation-strength :time rotation-time]]
      [:rotate [:from rotation-strength :to 0 :time rotation-time]])))
 
-(defn gen-move-behavior
+(defn move-behavior
   "Generate & return a move behavior for the target. Still must be added by calling .addBehavior.
    Examples: 
-   (gen-move-behavior :to {:up 30})
-   (gen-move-behavior :from {:up 30} :to {:down 30})
-   (gen-move-behavior :from {:down 30})
+   (move-behavior :to {:up 30})
+   (move-behavior :from {:up 30} :to {:down 30})
+   (move-behavior :from {:down 30})
 
-   (gen-move-behavior :from [0 0] :to [50 50] :time 120)
-   (gen-move-behavior :from [50 50] :to [0 0] :time [120 120])"
+   (move-behavior :from [0 0] :to [50 50] :time 120)
+   (move-behavior :from [50 50] :to [0 0] :time [120 120])"
   ;; TODO: Currently, :to & :from are relative to (0,0) with respect
   ;; to the container that target is in. This is counterintuitive and
   ;; should be relative to the targets current position. Also I
   ;; propose the following API change:
   ;;
-  ;; (gen-move-behavior target :to [10 10]) ;; movement to absolute position within parent container
-  ;; (gen-move-behavior target :up 5 :left 3) ;; relative (to current position) movement
-  ;; (gen-move-behavior target :from [0 0] :up 5) ;; initial absolute position & relative movement upwards
-  ;; (gen-move-behavior target :to [[10 10] [10 20]]) ;; multiple absolute positions
-  ;; (gen-move-behavior target :to [[:quadric 10 10 5 5]] ;; support for non-linear paths
+  ;; (move-behavior target :to [10 10]) ;; movement to absolute position within parent container
+  ;; (move-behavior target :up 5 :left 3) ;; relative (to current position) movement
+  ;; (move-behavior target :from [0 0] :up 5) ;; initial absolute position & relative movement upwards
+  ;; (move-behavior target :to [[10 10] [10 20]]) ;; multiple absolute positions
+  ;; (move-behavior target :to [[:quadric 10 10 5 5]] ;; support for non-linear paths
   [& {:keys [from to time auto-rotate?]
       :or {time 120 auto-rotate? false}}]
   (let [nr (fn [n] (or n 0))
@@ -96,7 +96,7 @@
 (defn deg->rad [deg]
   (* (* 2 Math/PI) (/ deg 360)))
 
-(defn gen-rotate-behavior [& {:keys [from to time rotation-anchor]
+(defn rotate-behavior [& {:keys [from to time rotation-anchor]
                               :or {from 0 to 0 time 120 rotation-anchor [0.5 0.5]}}]
   (let [[start-time time] (if (vector? time) time [0 time])]
     (doto (CAAT/RotateBehavior.)
@@ -107,35 +107,35 @@
                   (y-of rotation-anchor)
                   ))))
 
-(defn gen-scale-behavior [& {:keys [from to time]
+(defn scale-behavior [& {:keys [from to time]
                              :or {from 0 to 0 time 120}}]
   (let [[start-time time] (if (vector? time) time [0 time])]
     (doto (CAAT/ScaleBehavior.)
       (.setFrameTime start-time time) 
       (.setValues from to from to))))
 
-(defn gen-parallel-behavior [& args]
+(defn parallel-behavior [& args]
   (let [container (doto (CAAT/ContainerBehavior.)
                     (.setFrameTime 0 Number.MAX_VALUE))] 
     (doseq [spec args]
-      (let [bh (gen-behavior spec)] 
+      (let [bh (behavior spec)] 
         (.setFrameTime bh 0 (. bh (getDuration))) 
         (.addBehavior container bh)))
     container))
 
-(def kw->behavior-fn {:move (fn [arg] (apply gen-move-behavior arg))
-                      :rotate (fn [arg] (apply gen-rotate-behavior arg))
-                      :scale (fn [arg] (apply gen-scale-behavior arg))
-                      :parallel gen-parallel-behavior})
+(def kw->behavior-fn {:move (fn [arg] (apply move-behavior arg))
+                      :rotate (fn [arg] (apply rotate-behavior arg))
+                      :scale (fn [arg] (apply scale-behavior arg))
+                      :parallel parallel-behavior})
 
 (defprotocol AAnimationSpec
-  (gen-behavior [s]))
+  (behavior [s]))
 
 (extend-protocol AAnimationSpec
   CAAT.Behavior
-  (gen-behavior [s] s)
+  (behavior [s] s)
   cljs.core.Vector
-  (gen-behavior [v]
+  (behavior [v]
                 (let [[kind & args] v] 
                   (apply (kind kw->behavior-fn) args))))
 
@@ -167,7 +167,7 @@ explicitly specified using a wait-spec)."
                           (binding [*director* director]
                            (callback-fn t))))})))
                  (recur more t last-caat-behavior))
-             (let [bh (gen-behavior spec)
+             (let [bh (behavior spec)
                    dur (. bh (getDuration))
                    last-caat-behavior (if (instance? CAAT.Behavior bh) bh last-caat-behavior)] 
                (.setFrameTime bh t dur) 
@@ -177,7 +177,7 @@ explicitly specified using a wait-spec)."
                       last-caat-behavior)))))
        container)))
 
-(defn gen-animation
+(defn animation
   [target & animations]
   {:pre [(actor? target)]}
   (apply animation-specs->behavior target animations))
@@ -202,7 +202,7 @@ explicitly specified using a wait-spec)."
   ;;    list and add it to the target.
   ;; 3. Make sure to provide means to stop an animation.
   [target & animations]
-  (.addBehavior target (apply gen-animation target animations)))
+  (.addBehavior target (apply animation target animations)))
 
 (defn basket-head-munch! [basket-head & {:keys [on-finish] :or {on-finish (fn [])}}]
   (let [md 10]
@@ -244,7 +244,7 @@ explicitly specified using a wait-spec)."
 
 (def *director* nil)
 
-(defn gen-basket
+(defn basket
   "Generate & return the interactive basket.
    The basket will have doOpen & doClose methods to open & close
   it. Also it will open & close when hovered."
@@ -257,8 +257,8 @@ explicitly specified using a wait-spec)."
                            (.setBackgroundImage basket-sprite)
                            (.setLocation x y)
                            (.setFillStyle "#ff3fff"))
-        basket-body (gen-actor :image basket-sprite :sprite-index 1)
-        basket-head (gen-actor :image basket-head :events? false)]
+        basket-body (actor :image basket-sprite :sprite-index 1)
+        basket-head (actor :image basket-head :events? false)]
     (add! basket-container basket-body)
     (add! basket-container basket-head)
     (set! basket-container.isOpened false)
@@ -272,9 +272,9 @@ explicitly specified using a wait-spec)."
           (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
             (when (not this.isOpened)
               (log/info logger "Opening basket")
-              (animate basket-head (gen-shaky-behavior basket-head))
+              (animate basket-head (shaky-behavior basket-head))
               (animate basket-head
-                       (gen-move-behavior :to {:up 30})
+                       (move-behavior :to {:up 30})
                        (fn [t] (on-finish)))
               (.addBehavior basket-body
                             (doto (CAAT/ScaleBehavior.)
@@ -348,7 +348,7 @@ explicitly specified using a wait-spec)."
     (doto target
       (.enableDrag false)
       (.enableEvents false)
-      (.addBehavior (gen-move-behavior :from [(.x source) (.y source)] :to [(.x destination) (.y destination)]))
+      (.addBehavior (move-behavior :from [(.x source) (.y source)] :to [(.x destination) (.y destination)]))
       (.addBehavior (doto (CAAT/ScaleBehavior.)
                       (.setFrameTime (.time target) total-animation-time)
                       (.setValues 1 0.1 1 0.1)))
@@ -380,7 +380,7 @@ explicitly specified using a wait-spec)."
     (. ctx (fill)) 
     ))
 
-(defn gen-bubble
+(defn bubble
   "Generate a speech bubble with some text in it. Must be passed
   director, scene & text in that order. The text will be centered
   inside the bubble. Other args are (as keywords):
@@ -409,7 +409,7 @@ explicitly specified using a wait-spec)."
                (.setFillStyle "black")) 
         w (or w (+ text.textWidth 30))
         h (or h (+ text.textHeight 30))
-        bubble (gen-actor :events? false)
+        bubble (actor :events? false)
         x (if (fn? x) (x w h) x)
         y (if (fn? y) (y w h) y)]
     (.setBounds actor-container x y w h)
@@ -457,7 +457,7 @@ explicitly specified using a wait-spec)."
    (when current.object
      (log/info logger (str "Expiring old message bubble: " current.object))
      (.setExpired current.object (.time scene)))
-   (let [new-message (gen-bubble director scene msg :x x :y y :time duration)]
+   (let [new-message (bubble director scene msg :x x :y y :time duration)]
      (add! scene new-message)
      (set! current.object new-message))))
 
@@ -472,7 +472,7 @@ explicitly specified using a wait-spec)."
          (.setValues strength-start strength-end strength-start strength-end)
          (.setPingPong true))))))
 
-(defn gen-count-actor [total-count & {:keys [on-total-reached] :or {on-total-reached (fn [c])}}]
+(defn count-actor [total-count & {:keys [on-total-reached] :or {on-total-reached (fn [c])}}]
   (let [data {}
         actor (doto (CAAT/TextActor.) 
                 (.setFont "30px Comic Sans Ms")
@@ -585,8 +585,8 @@ explicitly specified using a wait-spec)."
   ;; (. context (stroke))
   )
 
-(defn gen-star [& {:keys [radius color] :or {radius 80 color "green"}}]
-  (let [actor (gen-actor :size [radius radius])]
+(defn star [& {:keys [radius color] :or {radius 80 color "green"}}]
+  (let [actor (actor :size [radius radius])]
     (m/wrap actor.paint [director time oldf]
           (draw-star director.ctx :radius radius :color color))
     actor))
@@ -634,7 +634,7 @@ explicitly specified using a wait-spec)."
      (when more
        (apply listen target more))))
 
-(defn gen-actor
+(defn actor
   [& {:keys [image draggable? fill-style position size sprite-index events?]
       :as kw
       :or {draggable? false}}]
@@ -661,7 +661,7 @@ explicitly specified using a wait-spec)."
       (.setSpriteIndex actor sprite-index))
     actor))
 
-(defn gen-animated-actor
+(defn animated-actor
   [scene & {:keys [image animation-indices default-index key-frames frame-time draggable? thumbnail]
                :or {image nil animation-indices [0] default-index 0 key-frames nil frame-time 150 draggable? false thumbnail nil}}]
   (assert (scene? scene) "First arg must be a scene instance.")
@@ -671,7 +671,7 @@ explicitly specified using a wait-spec)."
               (.initialize image 1 (or key-frames (+ 1 (apply max animation-indices)))) 
               (.setAnimationImageIndex (clj->js [default-index]))
               (.setChangeFPS frame-time)) 
-        actor (gen-actor :image img :draggable? true)]
+        actor (actor :image img :draggable? true)]
     (listen actor
             :mouse-enter
             (fn [e oldf] 
@@ -736,13 +736,13 @@ explicitly specified using a wait-spec)."
        (on-create scene-time)
        (dotimes [x batch-count]
          (let [rotation-direction (if (< (Math/random) 0.5) -1 1)
-               star (doto (gen-star :radius (rand-nth (map (comp dec dec dec) [12 14 16 18 20]))
+               star (doto (star :radius (rand-nth (map (comp dec dec dec) [12 14 16 18 20]))
                                     :color (rand-nth ["yellow" "chartreuse" "orange" "red" "powderblue" "magenta" "cyan"])) 
                       (.enableEvents false)
                       (.setLocation (+ (x-of start-position) (* x 10)) (+ (y-of start-position) (rand-int 30)))
                       ;; (. (cacheAsBitmap))
                       (.addBehavior
-                       (gen-rotate-behavior :from 0 :to (* rotation-direction (+ 180 (* (* (rand-int 2) -1) (rand-int 180))))
+                       (rotate-behavior :from 0 :to (* rotation-direction (+ 180 (* (* (rand-int 2) -1) (rand-int 180))))
                                             :time [scene-time 3000]))
                       ;; TODO: why is the following not working? (rotation stops after some seconds)
                       ;; (animate [:rotate [:from 0 :to (+ 180 (* (* (rand-int 2) -1) (rand-int 180)))
@@ -768,7 +768,7 @@ explicitly specified using a wait-spec)."
        )
      (fn []) (fn []))))
 
-(defn gen-winning-screen [scene]
+(defn winning-screen [scene]
   (let [director (director-of scene) 
         mask (doto (CAAT/ShapeActor.)
                (.setShape CAAT.ShapeActor.prototype.SHAPE_RECTANGLE) 
@@ -807,7 +807,7 @@ explicitly specified using a wait-spec)."
         song-playing? (atom false)
         play-icon (let [img (->image "play" :thumbnail [35 35])
                         img2 (->image "stop" :thumbnail [35 35])
-                        actor (gen-actor :image img)
+                        actor (actor :image img)
                         audio-loop (atom nil)] 
                     (set! actor.mouseClick
                           (fn [e]
@@ -881,7 +881,7 @@ explicitly specified using a wait-spec)."
        ))
     container))
 
-(defn gen-bookshelf [scene]
+(defn bookshelf [scene]
   (let [container (doto (CAAT/ActorContainer.)
                     (.setBounds 110 135 180 60)
                     ;; (.setFillStyle "green") ;; set this to see the area where a book can be placed
@@ -889,7 +889,7 @@ explicitly specified using a wait-spec)."
         img (-> "books"
               (->image :thumbnail [60 60])
               (->sprite :cols 3)) 
-        books (gen-actor :image img :sprite-index 0)]
+        books (actor :image img :sprite-index 0)]
     (set! container.inc-book-count
           (fn []
             (.setSpriteIndex books (mod (+ (.spriteIndex img) 1) 3))))
@@ -939,26 +939,26 @@ explicitly specified using a wait-spec)."
                      )
           (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
         (let [scene (. director (createScene))
-              background (gen-actor :image "room")
-              basket (gen-basket scene :x 440 :y 240)
-              bookshelf (gen-bookshelf scene)
-              counter (gen-count-actor 6 :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
+              background (actor :image "room")
+              basket (basket scene :x 440 :y 240)
+              bookshelf (bookshelf scene)
+              counter (count-actor 6 :on-total-reached (fn [e] (add! scene (winning-screen scene))))
               basket-objects (map
                               #(make-draggable-into % basket scene 
                                                     (fn [] (throw-into-basket director scene basket % counter))
                                                     :valid-fn (fn [] (and (not (.isOpened basket)) (not (.eating basket)))))
-                              [(gen-animated-actor scene :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                               (gen-animated-actor scene :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
-                               (gen-animated-actor scene :image "blocks" :animation-indices [0] :draggable? true)
-                               (gen-animated-actor scene :image "teddy" :animation-indices [0 1 0 2] :draggable? true)])
+                              [(animated-actor scene :image "football" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                               (animated-actor scene :image "car" :animation-indices [0] :draggable? true :thumbnail [60 60])
+                               (animated-actor scene :image "blocks" :animation-indices [0] :draggable? true)
+                               (animated-actor scene :image "teddy" :animation-indices [0 1 0 2] :draggable? true)])
               bookshelf-objects (map
                                  #(make-draggable-into % bookshelf scene 
                                                        (fn []
                                                          (.setExpired % true)
                                                          (. bookshelf (inc-book-count))
                                                          (. counter (inc))))
-                                 [(gen-animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
-                                  (gen-animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])
+                                 [(animated-actor scene :image "book" :animation-indices [2] :default-index 2 :key-frames 3 :draggable? true)
+                                  (animated-actor scene :image "book" :animation-indices [0] :default-index 0 :key-frames 3 :draggable? true)])
               objects (concat basket-objects bookshelf-objects)] 
           (log/info logger " Displaying scene")
           (add! scene background)
@@ -973,5 +973,5 @@ explicitly specified using a wait-spec)."
                object
                :position [(+ (rand-int 30) (* (/ 600 (count objects)) index) 100)
                           (+ (rand-int 50) 360)])))
-          ;; (add! scene (gen-winning-screen scene))
+          ;; (add! scene (winning-screen scene))
           ))))))
