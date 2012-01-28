@@ -44,32 +44,15 @@
 (defn gen-shaky-behavior
   "Generate & return a rotation behavior that will rotate a target left & right repeatedly."
   [target]
-  (let [container (CAAT/ContainerBehavior.)
-        total-time 1500.0
-        rotation-strenght (/ (* 2 Math/PI) 140)]
-    (.addBehavior
-     container
-     (doto (CAAT/RotateBehavior.)
-       (.setFrameTime 0 (/ total-time 4))
-       (.setValues 0 (- rotation-strenght))))
-    (.addBehavior
-     container
-     (doto (CAAT/RotateBehavior.)
-       (.setFrameTime (/ total-time 4) (* 2 (/ total-time 4)))
-       (.setValues (- rotation-strenght) 0)))
-    (.addBehavior
-     container
-     (doto (CAAT/RotateBehavior.)
-       (.setFrameTime (* 2 (/ total-time 4)) (* 3 (/ total-time 4)))
-       (.setValues 0 (+ rotation-strenght))))
-    (.addBehavior
-     container
-     (doto (CAAT/RotateBehavior.)
-       (.setFrameTime (* 3 (/ total-time 4)) (* 4 (/ total-time 4)))
-       (.setValues (+ rotation-strenght) 0)))
-    (.setCycle container true)
-    (.setFrameTime container (.time target) total-time)
-    container))
+  (let [total-time 1500.0
+        rotation-time (/ total-time 4)
+        rotation-strength (/ (* 2 Math/PI) 140)]
+    (gen-animation
+     target
+     [:rotate [:to (- rotation-strength) :time rotation-time]]
+     [:rotate [:from (- rotation-strength) :to 0 :time rotation-time]]
+     [:rotate [:from 0 :to rotation-strength :time rotation-time]]
+     [:rotate [:from rotation-strength :to 0 :time rotation-time]])))
 
 (defn gen-move-behavior
   "Generate & return a move behavior for the target. Still must be added by calling .addBehavior.
@@ -274,10 +257,10 @@ explicitly specified using a wait-spec)."
                            (.setBackgroundImage basket-sprite)
                            (.setLocation x y)
                            (.setFillStyle "#ff3fff"))
-        basket-body (gen-actor scene :image basket-sprite :sprite-index 1)
-        basket-head (gen-actor scene :image basket-head :events? false)]
-    (.addChild basket-container basket-body)
-    (.addChild basket-container basket-head)
+        basket-body (gen-actor :image basket-sprite :sprite-index 1)
+        basket-head (gen-actor :image basket-head :events? false)]
+    (add! basket-container basket-body)
+    (add! basket-container basket-head)
     (set! basket-container.isOpened false)
     (set! basket-container.doMunch
           (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
@@ -426,9 +409,7 @@ explicitly specified using a wait-spec)."
                (.setFillStyle "black")) 
         w (or w (+ text.textWidth 30))
         h (or h (+ text.textHeight 30))
-        bubble (doto (CAAT/Actor.)
-                 (.setLocation 0 0)
-                 (.enableEvents false))
+        bubble (gen-actor :events? false)
         x (if (fn? x) (x w h) x)
         y (if (fn? y) (y w h) y)]
     (.setBounds actor-container x y w h)
@@ -605,12 +586,9 @@ explicitly specified using a wait-spec)."
   )
 
 (defn gen-star [& {:keys [radius color] :or {radius 80 color "green"}}]
-  (let [actor (doto (CAAT/Actor.)
-                (.setBounds 0 0 radius radius))]
+  (let [actor (gen-actor :size [radius radius])]
     (m/wrap actor.paint [director time oldf]
           (draw-star director.ctx :radius radius :color color))
-    ;; (. actor (cacheAsBitmap))
-    ;; (.enableDrag actor true)
     actor))
 
 (defn actor? [s]
@@ -657,9 +635,10 @@ explicitly specified using a wait-spec)."
        (apply listen target more))))
 
 (defn gen-actor
-  [scene & {:keys [image draggable? fill-style position size sprite-index events?]
-            :or {draggable? false}}]
-  (assert (scene? scene) "First arg must be a scene.")
+  [& {:keys [image draggable? fill-style position size sprite-index events?]
+      :as kw
+      :or {draggable? false}}]
+  ;; (assert (scene? scene) "First arg must be a scene.")
   (when (and image fill-style)
    (log/info logger (str "WARNING: both :image & :fill-style set. No image will be visible.")))
   (when (and fill-style (not size) (not image))
@@ -675,8 +654,8 @@ explicitly specified using a wait-spec)."
     (when position
       (.setLocation (x-of position) (y-of position)))
     (when (not (false? draggable?))
-      (.enableDrag actor true))
-    (when events?
+      (.enableDrag actor true)) 
+    (when (not (nil? events?)) 
       (.enableEvents actor events?))
     (when sprite-index
       (.setSpriteIndex actor sprite-index))
@@ -692,7 +671,7 @@ explicitly specified using a wait-spec)."
               (.initialize image 1 (or key-frames (+ 1 (apply max animation-indices)))) 
               (.setAnimationImageIndex (clj->js [default-index]))
               (.setChangeFPS frame-time)) 
-        actor (gen-actor scene :image img :draggable? true)]
+        actor (gen-actor :image img :draggable? true)]
     (listen actor
             :mouse-enter
             (fn [e oldf] 
@@ -828,8 +807,7 @@ explicitly specified using a wait-spec)."
         song-playing? (atom false)
         play-icon (let [img (->image "play" :thumbnail [35 35])
                         img2 (->image "stop" :thumbnail [35 35])
-                        actor (doto (CAAT/Actor.)
-                                (.setBackgroundImage img))
+                        actor (gen-actor :image img)
                         audio-loop (atom nil)] 
                     (set! actor.mouseClick
                           (fn [e]
@@ -911,7 +889,7 @@ explicitly specified using a wait-spec)."
         img (-> "books"
               (->image :thumbnail [60 60])
               (->sprite :cols 3)) 
-        books (gen-actor scene :image img :sprite-index 0)]
+        books (gen-actor :image img :sprite-index 0)]
     (set! container.inc-book-count
           (fn []
             (.setSpriteIndex books (mod (+ (.spriteIndex img) 1) 3))))
@@ -961,8 +939,7 @@ explicitly specified using a wait-spec)."
                      )
           (.addAudio "song" "sounds/448614_Happiness_Alone.ogg"))
         (let [scene (. director (createScene))
-              background (doto (CAAT/Actor.) 
-                           (.setBackgroundImage (.getImage director "room")))
+              background (gen-actor :image "room")
               basket (gen-basket scene :x 440 :y 240)
               bookshelf (gen-bookshelf scene)
               counter (gen-count-actor 6 :on-total-reached (fn [e] (add! scene (gen-winning-screen scene))))
