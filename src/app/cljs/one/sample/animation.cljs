@@ -41,21 +41,8 @@
   (y-of [t] (.y t)))
 
 
-(defn shaky-behavior
-  "Generate & return a rotation behavior that will rotate a target left & right repeatedly."
-  [target]
-  (let [total-time 1500.0
-        rotation-time (/ total-time 4)
-        rotation-strength (/ (* 2 Math/PI) 140)]
-    (animation
-     target
-     [:rotate [:to (- rotation-strength) :time rotation-time]]
-     [:rotate [:from (- rotation-strength) :to 0 :time rotation-time]]
-     [:rotate [:from 0 :to rotation-strength :time rotation-time]]
-     [:rotate [:from rotation-strength :to 0 :time rotation-time]])))
-
 (def pathspec-kw->applyable-fn
-     {:linear (fn [path x y] (do (log/info logger (str "Adding path to " x "," y)) (.addLineTo path x y)))
+     {:linear (fn [path x y] (.addLineTo path x y))
       :quadric (fn [path cpx cpy x y] (.addQuadricTo path cpx cpy x y))
       :cubic (fn [path cpx1 cpy1 cpx2 cpy2 x y] (.addCubicTo path cpx1 cpy1 cpx2 cpy2 x y))
       ;; TODO:
@@ -83,17 +70,13 @@
    (move-behavior :from {:down 30})
 
    (move-behavior :from [0 0] :to [50 50] :time 120)
-   (move-behavior :from [50 50] :to [0 0] :time [120 120])"
-  ;; TODO: Currently, :to & :from are relative to (0,0) with respect
-  ;; to the container that target is in. This is counterintuitive and
-  ;; should be relative to the targets current position. Also I
-  ;; propose the following API change:
-  ;;
-  ;; (move-behavior target :to [10 10]) ;; movement to absolute position within parent container
-  ;; (move-behavior target :up 5 :left 3) ;; relative (to current position) movement
-  ;; (move-behavior target :from [0 0] :up 5) ;; initial absolute position & relative movement upwards
-  ;; (move-behavior target :to [[10 10] [10 20]]) ;; multiple absolute positions
-  ;; (move-behavior target :to [[:quadric 10 10 5 5]] ;; support for non-linear paths
+   (move-behavior :from [50 50] :to [0 0] :time [120 120])
+
+   (move-behavior :target target :to [10 10]) ;; movement to absolute position within parent container
+   (move-behavior :target target :up 5 :left 3) ;; relative (to current position) movement
+   (move-behavior :target target :from [0 0] :up 5) ;; initial absolute position & relative movement upwards
+   (move-behavior :target target :to [[10 10] [10 20]]) ;; multiple absolute positions
+   (move-behavior :target target :to [[:quadric 10 10 5 5]] ;; support for non-linear paths"
   [& {:keys [from to time dur auto-rotate? target up down left right]
       ;; TODO: remove :time
       :or {time 120 auto-rotate? false}}]
@@ -133,9 +116,9 @@
 (defn deg->rad [deg]
   (* (* 2 Math/PI) (/ deg 360)))
 
-(defn rotate-behavior [& {:keys [from to time rotation-anchor]
+(defn rotate-behavior [& {:keys [from to time rotation-anchor target]
                               :or {from 0 to 0 time 120 rotation-anchor [0.5 0.5]}}]
-  (let [[start-time time] (if (vector? time) time [0 time])]
+  (let [[start-time time] (if (vector? time) time [(or (and target (.time target)) 0) time])]
     (doto (CAAT/RotateBehavior.)
       (.setFrameTime start-time time) 
       (.setValues (deg->rad from)
@@ -144,86 +127,21 @@
                   (y-of rotation-anchor)
                   ))))
 
-(defn scale-behavior [& {:keys [from to time]
+(defn scale-behavior [& {:keys [from to time target]
                          :or {from 0 to 0 time 120}}]
-  (let [[start-time time] (if (vector? time) time [0 time])]
+  (let [[start-time time] (if (vector? time) time [(or (and target (.time target)) 0) time])]
     (doto (CAAT/ScaleBehavior.)
       (.setFrameTime start-time time) 
       (.setValues from to from to))))
 
-(defn alpha-behavior [& {:keys [from to time]
+(defn alpha-behavior [& {:keys [from to time target]
                          :or {from 0 to 0 time 120}}]
-  (let [[start-time time] (if (vector? time) time [0 time])]
+  (let [[start-time time] (if (vector? time) time [(or (and target (.time target)) 0) time])]
     (doto (CAAT/AlphaBehavior.)
       (.setFrameTime start-time time) 
       (.setValues from to))))
 
-(defn parallel-behavior [& args]
-  (let [container (doto (CAAT/ContainerBehavior.)
-                    (.setFrameTime 0 Number.MAX_VALUE))] 
-    (doseq [spec args]
-      (let [bh (behavior spec)] 
-        (.setFrameTime bh 0 (. bh (getDuration))) 
-        (.addBehavior container bh)))
-    container))
-
-(def kw->behavior-fn {:move (fn [arg] (apply move-behavior arg))
-                      :rotate (fn [arg] (apply rotate-behavior arg))
-                      :scale (fn [arg] (apply scale-behavior arg))
-                      :alpha (fn [arg] (apply alpha-behavior arg))
-                      :parallel parallel-behavior})
-
-(defprotocol AAnimationSpec
-  (behavior [s]))
-
-(extend-protocol AAnimationSpec
-  CAAT.Behavior
-  (behavior [s] s)
-  cljs.core.Vector
-  (behavior
-   [v]
-   (let [[kind & args] v] 
-     (apply (kind kw->behavior-fn) args))))
-
-(defn animation-specs->behavior
-  "Given a TARGET and any number of animation SPECS, create & return a
-ContainerBehavior which encompasses all the animations. The animations
-will be executed syncronously. Any starting-time set on a spec will be
-overriden, so that there are no waits between animations (unless
-explicitly specified using a wait-spec)."
-  ([target & specs]
-     (let [container (doto (CAAT/ContainerBehavior.)
-                       (.setFrameTime (.time target) Number.MAX_VALUE))
-           ;; store the current director, so it can be bound inside callbacks
-           director *director*]
-       (loop [[spec & more] specs
-              t 0
-              last-caat-behavior nil]
-         (when (not (nil? spec))
-           (if (fn? spec)
-             (do (when last-caat-behavior
-                   ;; (log/info logger (str "Adding listener fn: " spec " to " last-caat-behavior))
-                   (.addListener
-                    last-caat-behavior
-                    (clj->js
-                     {:behaviorExpired
-                      (let [callback-fn spec]
-                        (fn [bh t a]
-                          ;; (log/info logger (pr-str "Calling expiration fn" spec))
-                          (binding [*director* director]
-                           (callback-fn t))))})))
-                 (recur more t last-caat-behavior))
-             (let [bh (behavior spec)
-                   dur (. bh (getDuration))
-                   last-caat-behavior (if (instance? CAAT.Behavior bh) bh last-caat-behavior)] 
-               (.setFrameTime bh t dur) 
-               (.addBehavior container bh)
-               (recur more
-                      (+ t dur)
-                      last-caat-behavior)))))
-       container)))
-
-(def kw->behavior-fn2
+(def kw->behavior-fn
      {:move move-behavior
       :rotate rotate-behavior
       :scale scale-behavior
@@ -233,7 +151,7 @@ explicitly specified using a wait-spec)."
   "Given a behavior spec like [:move ...], transform that into an actual CAAT.Behavior."
   [spec target]
   (let [[kind & args] spec]
-    (apply (kw->behavior-fn2 kind) :target target args)))
+    (apply (kw->behavior-fn kind) :target target args)))
 
 
 (defn create-animation
@@ -281,67 +199,58 @@ applied to a target to animate it."
   ([target & specs]
      ((apply create-animation specs) target)))
 
+(let [total-time 1500.0
+      rotation-time (/ total-time 4)
+      rotation-strength (/ (* 2 Math/PI) 140)]
+  (def shake-animation
+       (create-animation
+        [:rotate [:to (- rotation-strength) :time rotation-time]]
+        [:rotate [:from (- rotation-strength) :to 0 :time rotation-time]]
+        [:rotate [:from 0 :to rotation-strength :time rotation-time]]
+        [:rotate [:from rotation-strength :to 0 :time rotation-time]]))) 
 
-(defn animation
-  [target & animations]
-  {:pre [(actor? target)]}
-  (apply animation-specs->behavior target animations))
+(defn shake!
+  "Generate & apply a rotation behavior that will rotate a target left & right repeatedly."
+  [target]
+  (shake-animation target))
 
-(defn animate
-  "Animate a target. Besides the target, takes any number of behavior specs.
-   For supported specs, take a look at the KW->BEHAVIOR-FN map.
-  Example:
-    (animate target [:move [:to {:up md :left 5} :time 200]])"
-  ;; TODO: Currently it is not possible to issue behaviors which are
-  ;; relative to their previous behavior, without doing the necessary
-  ;; calculations beforehand. This is because all Behaviors are being
-  ;; created at the same time and there is no access to values which
-  ;; would have been changed during behavior execution. I propose the
-  ;; following change to fix that:
-  ;;
-  ;; 1. animate -> animate!
-  ;; 
-  ;; 2. instead of creating all behaviors directly, only create the
-  ;;    first behavior from the list of behavior specs. Then, upon
-  ;;    finishing of that behavior, create the next behavior in the
-  ;;    list and add it to the target.
-  ;; 3. Make sure to provide means to stop an animation.
-  [target & animations]
-  (.addBehavior target (apply animation target animations)))
 
 (defn basket-head-munch! [basket-head & {:keys [on-finish] :or {on-finish (fn [])}}]
   (let [md 10]
-    (animate basket-head 
-             [:move [:to {:up md :left 5} :time 200]]
-             [:move [:from {:up md :left 5} :time 300]]
-             [:move [:to {:up md :left (- 5)} :time 150]]
-             [:move [:from {:up md :left (- 5)} :time 300]]
-             [:move [:to {:up (/ md 2) :left 5} :time 200]]
-             [:move [:from {:up (/ md 2) :left 5} :time 100]]
-             [:move [:to {:up (/ md 2) :left (- 5)} :time 150]]
-             [:move [:from {:up (/ md 2) :left (- 5)} :time 100]]
-             (fn [t] (on-finish)))))
+    (animate!
+     basket-head 
+     [:move :up md :left 5 :time 200]
+     [:move :to [0 0] :time 300]
+     [:move :up md :left (- 5) :time 150]
+     [:move :to [0 0] :time 300]
+     [:move :up (/ md 2) :left 5 :time 200]
+     [:move :to [0 0] :time 100]
+     [:move :up (/ md 2) :left (- 5) :time 150]
+     [:move :to [0 0] :time 100]
+     (fn [t] (on-finish)))))
 
 (defn basket-head-talk! [basket-head]
   (let [md 10
         tpa 90]
    (apply
-    animate basket-head
-            (apply
-             concat
-             (repeat
-              2
-              [[:move [:to {:up md :left 5} :time tpa]]
-               [:move [:from {:up md :left 5} :time tpa]]
-               [:move [:to {:up md :left (- 5)} :time tpa]]
-               [:move [:from {:up md :left (- 5)} :time tpa]]])))))
+    animate!
+    basket-head
+    (apply
+     concat
+     (repeat
+      2
+      [[:move :up md :left 5 :time tpa]
+       [:move :to [0 0] :time tpa]
+       [:move :up md :left (- 5) :time tpa]
+       [:move :to [0 0] :time tpa]])))))
 
 (defn basket-body-shake! [basket-body]
-  (animate basket-body
-           [:rotate [:to 5 :time 80]]
-           [:rotate [:from 5 :time 80]]
-           [:rotate [:to -5 :time 80]]
-           [:rotate [:from -5 :time 80]]))
+  (animate!
+   basket-body
+   [:rotate :to 5 :time 80]
+   [:rotate :from 5 :time 80]
+   [:rotate :to -5 :time 80]
+   [:rotate :from -5 :time 80]))
 
 (defn ->director [v]
   (cond (nil? v) (or *director* (throw "No director bound."))
@@ -377,7 +286,7 @@ applied to a target to animate it."
           (fn [& {:keys [on-finish] :or {on-finish (fn [])}}]
             (when (not this.isOpened)
               ;; (log/info logger "Opening basket")
-              (animate basket-head (shaky-behavior basket-head))
+              (shake! basket-head)
               (animate!
                basket-head
                [:move :up 30]
@@ -393,7 +302,7 @@ applied to a target to animate it."
                 (. (emptyBehaviorList))
                 (.setRotation 0)
                 (animate! [:move :to [0 0]] (fn [t] (on-finish))))
-              (animate! basket-body [:scale :to 1 :time 120]) 
+              (animate! basket-body [:scale :from scale-factor :to 1 :time 120]) 
               (set! this.isOpened false))))
     ;; make sure the sprite changes when the mouse hovers over the basket
     (listen basket-body :mouse-enter (fn [mouseEvent] (. basket-container (doOpen))))
@@ -601,12 +510,12 @@ applied to a target to animate it."
     (listen target
             :mouse-enter
             (fn [e oldf]
-              (animate target [:scale [:from 1 :to 1.1 :time 150]]) 
+              (animate! target [:scale :from 1 :to 1.1 :time 150]) 
               (oldf target e)))
     (listen target :mouse-exit
             (fn [e oldf]
               (when (not target.trashed)
-                (animate target [:scale [:from 1.1 :to 1 :time 150]]))
+                (animate! target [:scale :from 1.1 :to 1 :time 150]))
               (oldf target e)))))
 
 (defn make-draggable-into
@@ -928,16 +837,16 @@ applied to a target to animate it."
           (fn animate-text []
             (let [r1 (+ 1 (rand-int 4))
                   r2 (- (+ 1 (rand-int 4)))]
-              (animate text
-                       [:rotate [:from 0 :to r1 :time 1000]]
-                       [:rotate [:from r1 :to r2 :time 1000]]
-                       [:rotate [:from r2 :to 0 :time 1000]]
+              (animate! text
+                        [:rotate :from 0 :to r1 :time 1000]
+                        [:rotate :from r1 :to r2 :time 1000]
+                        [:rotate :from r2 :to 0 :time 1000]
                        (fn [t] (animate-text)))))
           animate-text2
           (fn animate-text []
-            (animate text
-                     [:scale [:from 1 :to 1.05 :time 1000]]
-                     [:scale [:from 1.05 :to 1 :time 1000]]
+            (animate! text
+                      [:scale :from 1 :to 1.05 :time 1000]
+                      [:scale :from 1.05 :to 1 :time 1000]
                      (fn [t] (animate-text))))]
       (animate-text)
       (animate-text2)) 

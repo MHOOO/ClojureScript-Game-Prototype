@@ -38,9 +38,14 @@ CAAT.PathBehavior.prototype.setAutoRotate = function() {};
 CAAT.PathBehavior.prototype.setPath = function() {};
 CAAT.Path = function() {};
 CAAT.Path.prototype.setLinear = function() {};
+CAAT.Path.prototype.setQuadric = function() {};
 CAAT.Path.prototype.beginPath = function() {};
+CAAT.Path.prototype.closePath = function() {};
 CAAT.Path.prototype.endPath = function() {};
 CAAT.Path.prototype.addQuadricTo = function() {};
+CAAT.Path.prototype.addLineTo = function() {};
+CAAT.Path.prototype.addCubicTo = function() {};
+
 CAAT.ScaleBehavior = function() {};
 
 CAAT.ActorContainer = function() {};
