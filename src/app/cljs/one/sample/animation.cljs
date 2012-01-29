@@ -833,23 +833,20 @@ applied to a target to animate it."
               (set! ctx.shadowColor "yellow")
               (set! ctx.shadowBlur 20)
               (default text director time)))
-    (let [animate-text
-          (fn animate-text []
-            (let [r1 (+ 1 (rand-int 4))
-                  r2 (- (+ 1 (rand-int 4)))]
-              (animate! text
-                        [:rotate :from 0 :to r1 :time 1000]
-                        [:rotate :from r1 :to r2 :time 1000]
-                        [:rotate :from r2 :to 0 :time 1000]
-                       (fn [t] (animate-text)))))
-          animate-text2
-          (fn animate-text []
-            (animate! text
-                      [:scale :from 1 :to 1.05 :time 1000]
-                      [:scale :from 1.05 :to 1 :time 1000]
-                     (fn [t] (animate-text))))]
-      (animate-text)
-      (animate-text2)) 
+    ((fn animate-text []
+       (let [r1 (+ 1 (rand-int 3))
+             r2 (- (+ 1 (rand-int 3)))]
+         (animate! text
+                   [:rotate :from 0 :to r1 :time 1000]
+                   [:rotate :from r1 :to r2 :time 1000]
+                   [:rotate :from r2 :to 0 :time 1000]
+                   (fn [t] (animate-text))))))
+    ((fn animate-text []
+       (let [r1 (+ 1 0.02 (/ (rand-int 3) 100))]
+         (animate! text
+                   [:scale :from 1 :to r1 :time 1000]
+                   [:scale :from r1 :to 1 :time 1000]
+                   (fn [t] (animate-text)))))) 
     (dotimes [i 11]
       (repeatedly-create-stars
        container scene
@@ -863,10 +860,10 @@ applied to a target to animate it."
                     (let [volume (atom 1)]
                       (fn [t]
                         (when (not @song-playing?)
-                         (let [sound (.getAudio (. director (getAudioManager)) "chime")]
-                           (.audioPlay director "chime")
-                           (set! sound.volume @volume)
-                           (reset! volume (max 0.2 (- @volume 0.2))))))) (fn [t]))
+                          (let [sound (.getAudio (. director (getAudioManager)) "chime")]
+                            (.audioPlay director "chime")
+                            (set! sound.volume @volume)
+                            (reset! volume (max 0.2 (- @volume 0.2))))))) (fn [t]))
        ))
     container))
 
