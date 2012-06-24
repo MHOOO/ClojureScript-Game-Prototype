@@ -12,6 +12,6 @@ The last function /initialize-views/ does all the setup.
 There is a pre-compiled version inside the public/ directory. You may
 however also run it by calling
 
-   script/deps
-   script/run
+    script/deps
+    script/run
 
